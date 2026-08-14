@@ -1,0 +1,6 @@
+.vscode/**
+src/**
+!src/webview/**
+out/test/**
+**/*.map
+node_modules/**

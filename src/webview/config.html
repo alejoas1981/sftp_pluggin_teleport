@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src {{styleUri}} 'unsafe-inline'; script-src {{scriptUri}} 'unsafe-inline';">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SFTP Configuration</title>
+    <link rel="stylesheet" href="{{styleUri}}">
+</head>
+<body>
+    <h1>SFTP Configuration</h1>
+    <form id="config-form">
+        <label>Teleport Host<input type="text" id="teleportHost" placeholder="example.teleport.com"></label>
+        <label>Teleport User<input type="text" id="teleportUser"></label>
+        <label>Teleport Cluster<input type="text" id="teleportCluster" placeholder="main"></label>
+        <label>SFTP Host<input type="text" id="sftpHost"></label>
+        <label>SFTP User<input type="text" id="sftpUser"></label>
+        <label>Remote Path<input type="text" id="remotePath"></label>
+        <label>Local Path<input type="text" id="localPath"></label>
+        <label>Identity File<input type="text" id="identity" placeholder="~/.ssh/id_rsa"></label>
+        <label>Password<input type="password" id="password" placeholder="stored securely"></label>
+        <label>Debounce (ms)<input type="number" id="debounceMs" value="300"></label>
+        <label class="checkbox"><input type="checkbox" id="useTeleport" checked> Use Teleport (tsh)</label>
+        <div class="actions">
+            <button type="submit">Save</button>
+            <button type="button" id="test-teleport">Test Teleport</button>
+            <button type="button" id="dry-run">Dry Run</button>
+            <button type="button" id="sync-now">Sync Now</button>
+        </div>
+    </form>
+    <div id="status"></div>
+    <script src="{{scriptUri}}"></script>
+</body>
+</html>

@@ -1,0 +1,18 @@
+{
+  "teleport": {
+    "host": "example.teleport.com",
+    "user": "developer",
+    "proxy": "tsh",
+    "cluster": "main"
+  },
+  "sftp": {
+    "host": "sftp.example.com",
+    "user": "sftp_user",
+    "remotePath": "/home/sftp_user/project",
+    "localPath": "./project"
+  },
+  "sync": {
+    "interval": 5000,
+    "debounce": 300
+  }
+}

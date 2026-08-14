@@ -1,0 +1,53 @@
+import * as vscode from 'vscode';
+import { SftpConfig } from './config';
+import { runSync } from './sync';
+
+let activeWatcher: vscode.FileSystemWatcher | undefined;
+let debounceTimer: NodeJS.Timeout | undefined;
+
+export function startWatching(
+    context: vscode.ExtensionContext,
+    config: SftpConfig,
+    output: vscode.OutputChannel
+): void {
+    stopWatching();
+
+    if (!config.localPath) {
+        throw new Error('localPath is required to start watching');
+    }
+
+    const base = vscode.Uri.file(config.localPath);
+    const pattern = new vscode.RelativePattern(base, '**');
+
+    activeWatcher = vscode.workspace.createFileSystemWatcher(pattern, false, false, false);
+
+    const onEvent = (uri: vscode.Uri) => {
+        output.appendLine(`[watch] ${uri.fsPath}`);
+        if (debounceTimer) {
+            clearTimeout(debounceTimer);
+        }
+        debounceTimer = setTimeout(() => {
+            runSync(config)
+                .then((result) => output.appendLine(result))
+                .catch((error) => output.appendLine(`[sync error] ${error.message}`));
+        }, config.debounceMs || 300);
+    };
+
+    activeWatcher.onDidChange(onEvent);
+    activeWatcher.onDidCreate(onEvent);
+    activeWatcher.onDidDelete(onEvent);
+
+    context.subscriptions.push(activeWatcher);
+    output.appendLine('[watch] started');
+}
+
+export function stopWatching(): void {
+    if (debounceTimer) {
+        clearTimeout(debounceTimer);
+        debounceTimer = undefined;
+    }
+    if (activeWatcher) {
+        activeWatcher.dispose();
+        activeWatcher = undefined;
+    }
+}

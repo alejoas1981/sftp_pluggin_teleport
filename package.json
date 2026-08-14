@@ -1,0 +1,64 @@
+{
+  "name": "sftp-pluggin",
+  "displayName": "SFTP Plugin",
+  "description": "VS Code plugin for SFTP with Teleport integration",
+  "version": "0.0.1",
+  "publisher": "Aleksey Savchenko",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/your-publisher/sftp-pluggin"
+  },
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "sftpPluggin.openConfig",
+        "title": "SFTP: Open Configuration"
+      },
+      {
+        "command": "sftpPluggin.syncNow",
+        "title": "SFTP: Sync Now"
+      },
+      {
+        "command": "sftpPluggin.dryRun",
+        "title": "SFTP: Dry Run"
+      },
+      {
+        "command": "sftpPluggin.startWatching",
+        "title": "SFTP: Start Watching"
+      },
+      {
+        "command": "sftpPluggin.stopWatching",
+        "title": "SFTP: Stop Watching"
+      },
+      {
+        "command": "sftpPluggin.testTeleport",
+        "title": "SFTP: Test Teleport Connection"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "test": "mocha --require ts-node/register 'src/test/**/*.test.ts'"
+  },
+  "devDependencies": {
+    "@types/chai": "4.3.11",
+    "@types/mocha": "10.0.6",
+    "@types/node": "20.11.5",
+    "@types/vscode": "1.80.0",
+    "@vscode/vsce": "2.24.0",
+    "chai": "4.4.1",
+    "mocha": "10.4.0",
+    "ts-node": "10.9.2",
+    "typescript": "5.5.4"
+  }
+}

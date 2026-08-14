@@ -1,0 +1,9 @@
+out/
+node_modules/
+.vscode-test/
+.vscode/
+.idea/
+.zed/
+npm-cache/
+vscode-sftp-plugin/
+*.vsix
