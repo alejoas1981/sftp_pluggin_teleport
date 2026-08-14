@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import { getConfiguration, saveConfiguration, getPassword, SftpConfig } from './config';
-import { runSync, testTeleport } from './sync';
+import { runSync, testTeleport, loginToTeleport } from './sync';
 import { startWatching, stopWatching } from './watcher';
 
 let outputChannel: vscode.OutputChannel;
@@ -15,6 +15,7 @@ export function activate(context: vscode.ExtensionContext) {
 
     context.subscriptions.push(
         vscode.commands.registerCommand('sftpPluggin.openConfig', () => openConfigPanel(context)),
+        vscode.commands.registerCommand('sftpPluggin.teleportLogin', () => runCommand(runTeleportLogin)),
         vscode.commands.registerCommand('sftpPluggin.syncNow', () => runCommand((cfg) => runSyncCommand(cfg, false))),
         vscode.commands.registerCommand('sftpPluggin.dryRun', () => runCommand((cfg) => runSyncCommand(cfg, true))),
         vscode.commands.registerCommand('sftpPluggin.testTeleport', () => runCommand(runTeleportTest)),
@@ -51,6 +52,25 @@ async function runTeleportTest(config: SftpConfig): Promise<void> {
     const result = await testTeleport(config);
     outputChannel.appendLine(result);
     vscode.window.showInformationMessage('Teleport session is active');
+}
+
+async function runTeleportLogin(config: SftpConfig): Promise<void> {
+    outputChannel.appendLine('[teleport] starting login');
+    const result = await vscode.window.withProgress(
+        { location: vscode.ProgressLocation.Notification, title: 'Teleport login in progress...' },
+        async () => loginToTeleport(config, {
+            onLink: (url) => {
+                vscode.window.showInformationMessage(`Open Teleport login: ${url}`, 'Open in browser').then((choice) => {
+                    if (choice === 'Open in browser') {
+                        vscode.env.openExternal(vscode.Uri.parse(url));
+                    }
+                });
+                vscode.env.openExternal(vscode.Uri.parse(url));
+            }
+        })
+    );
+    outputChannel.appendLine(result);
+    vscode.window.showInformationMessage('Teleport login successful');
 }
 
 function startWatcher(context: vscode.ExtensionContext, config: SftpConfig): void {
@@ -98,6 +118,24 @@ function openConfigPanel(context: vscode.ExtensionContext) {
                 panel.webview.postMessage({ command: 'saved' });
                 vscode.window.showInformationMessage('SFTP configuration saved');
                 break;
+            case 'login': {
+                try {
+                    const cfg = await loadConfig();
+                    const result = await vscode.window.withProgress(
+                        { location: vscode.ProgressLocation.Notification, title: 'Teleport login in progress...' },
+                        async () => loginToTeleport(cfg, {
+                            onLink: (url) => {
+                                vscode.env.openExternal(vscode.Uri.parse(url));
+                            }
+                        })
+                    );
+                    outputChannel.appendLine(result);
+                    panel.webview.postMessage({ command: 'loginResult', status: 'ok', detail: 'Login successful' });
+                } catch (error: any) {
+                    panel.webview.postMessage({ command: 'loginResult', status: 'error', detail: error.message });
+                }
+                break;
+            }
             case 'test': {
                 try {
                     const cfg = await loadConfig();

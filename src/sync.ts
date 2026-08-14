@@ -50,6 +50,46 @@ export function testTeleport(_config: SftpConfig): Promise<string> {
     return spawnCommand('tsh', ['status'], { env: process.env });
 }
 
+export interface LoginOptions {
+    onLink?: (url: string) => void;
+}
+
+export function loginToTeleport(config: SftpConfig, options: LoginOptions = {}): Promise<string> {
+    const args: string[] = ['login'];
+    if (config.teleportHost) { args.push(`--proxy=${config.teleportHost}`); }
+    if (config.teleportUser) { args.push(`--user=${config.teleportUser}`); }
+    if (config.teleportCluster) { args.push(`--cluster=${config.teleportCluster}`); }
+
+    return new Promise<string>((resolve, reject) => {
+        const child = cp.spawn('tsh', args, { env: process.env });
+        let stdout = '';
+        let stderr = '';
+
+        const handleData = (data: Buffer): string => {
+            const text = data.toString();
+            if (options.onLink) {
+                const match = text.match(/https?:\/\/[^\s]+/);
+                if (match) {
+                    options.onLink(match[0]);
+                }
+            }
+            return text;
+        };
+
+        child.stdout.on('data', (data) => { stdout += handleData(data); });
+        child.stderr.on('data', (data) => { stderr += handleData(data); });
+        child.on('error', reject);
+        child.on('close', (code) => {
+            if (code !== 0) {
+                const message = stderr.trim() || stdout.trim() || `tsh login exited with code ${code}`;
+                reject(new Error(message));
+                return;
+            }
+            resolve(stdout.trim());
+        });
+    });
+}
+
 function spawnCommand(
     command: string,
     args: string[],

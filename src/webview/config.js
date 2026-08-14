@@ -50,6 +50,11 @@ document.getElementById('config-form').addEventListener('submit', (event) => {
     vscode.postMessage({ command: 'save', config: readConfig() });
 });
 
+document.getElementById('teleport-login').addEventListener('click', () => {
+    setStatus('Teleport login in progress... open your browser when prompted');
+    vscode.postMessage({ command: 'login' });
+});
+
 document.getElementById('test-teleport').addEventListener('click', () => {
     setStatus('Testing Teleport...');
     vscode.postMessage({ command: 'test' });
@@ -74,6 +79,7 @@ window.addEventListener('message', (event) => {
         case 'saved':
             setStatus('Configuration saved', 'ok');
             break;
+        case 'loginResult':
         case 'testResult':
         case 'syncResult':
             setStatus(message.detail, message.status);

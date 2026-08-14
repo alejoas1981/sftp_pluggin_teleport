@@ -9,6 +9,7 @@
 </head>
 <body>
     <h1>SFTP Configuration</h1>
+    <p>1. Fill the fields → Save. 2. Press "Login to Teleport" for browser SSO. 3. Test, Sync or Start Watching.</p>
     <form id="config-form">
         <label>Teleport Host<input type="text" id="teleportHost" placeholder="example.teleport.com"></label>
         <label>Teleport User<input type="text" id="teleportUser"></label>
@@ -23,6 +24,7 @@
         <label class="checkbox"><input type="checkbox" id="useTeleport" checked> Use Teleport (tsh)</label>
         <div class="actions">
             <button type="submit">Save</button>
+            <button type="button" id="teleport-login">Login to Teleport</button>
             <button type="button" id="test-teleport">Test Teleport</button>
             <button type="button" id="dry-run">Dry Run</button>
             <button type="button" id="sync-now">Sync Now</button>

@@ -39,6 +39,10 @@
         "title": "SFTP: Stop Watching"
       },
       {
+        "command": "sftpPluggin.teleportLogin",
+        "title": "SFTP: Teleport Login"
+      },
+      {
         "command": "sftpPluggin.testTeleport",
         "title": "SFTP: Test Teleport Connection"
       }

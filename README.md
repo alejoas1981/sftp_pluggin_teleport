@@ -1,64 +1,117 @@
-# VS Code SFTP Plugin
+# SFTP Plugin for VS Code (Teleport)
 
-## Overview
+VS Code extension for incremental file sync over `rsync` through a Teleport (`tsh`) tunnel.
+Provides a settings UI, browser SSO login, connection test, one-time sync, dry-run preview, and automatic file watcher.
 
-This plugin provides a **graphical interface** for **incremental SFTP synchronization** through **Teleport proxy (`tsh`)**, replacing a legacy shell script with a modern, secure, and reliable solution.
+## What you need first
 
-## Features
+- [Visual Studio Code](https://code.visualstudio.com/) 1.80 or newer (or Devin Desktop)
+- [Teleport CLI (`tsh`)](https://goteleport.com/docs/connect-your-client/tsh/) installed and available in `$PATH`
+- `rsync` installed (macOS and most Linux distributions include it)
+- A Teleport cluster and an SSH/SFTP host reachable through it
 
-- **Graphical UI** for configuring Teleport and SFTP parameters (host, user, paths)
-- **Connection test** to ensure Teleport access
-- **Real-time progress visualization** (progress bar, speed, ETA)
-- **Incremental sync** with debouncing and polling to prevent unnecessary transfers
-- **Secure credential handling** using VS Code's secure storage API
-- **Robust error handling** and retry mechanisms
+## Install the extension
 
-## Installation
+1. Take the built file `sftp-pluggin-0.0.1.vsix`.
+2. Open VS Code / Devin Desktop.
+3. Open the **Extensions** view (left sidebar, four squares icon).
+4. Click the `...` menu (More Actions) and choose **Install from VSIX...**.
+5. Select `sftp-pluggin-0.0.1.vsix`.
+6. After installation, open the Command Palette (`Cmd+Shift+P` on macOS, `Ctrl+Shift+P` on Linux/Windows) and type `SFTP`.
 
-1. Open VS Code
-2. Go to Extensions view by clicking on the Extensions icon in the Activity Bar on the left
-3. Search for **'SFTP Plugin'**
-4. Click **Install**
+## Configure the plugin
 
-## Usage
+1. Run `SFTP: Open Configuration` in the Command Palette.
+2. Fill in the form:
 
-1. Open the Command Palette (`Ctrl+Shift+P`) and type **'SFTP: Configure'** to set up your Teleport and SFTP parameters
-2. Use the **Status Panel** to monitor real-time synchronization progress
-3. Ensure **Teleport is installed** and configured on your system
+   | Field | Example | What it means |
+   |---|---|---|
+   | Teleport Host | `example.teleport.com` | Your Teleport proxy host |
+   | Teleport User | `oleksii.savchenko` | Your Teleport username |
+   | Teleport Cluster | `main` | Teleport cluster name (optional) |
+   | SFTP Host | `sftp.example.com` | Target host inside Teleport |
+   | SFTP User | `sftp_user` | Username on the target host |
+   | Remote Path | `/home/sftp_user/project` | Destination folder on the server |
+   | Local Path | `/Users/you/project` | Source folder on your machine |
+   | Identity File | `~/.ssh/id_rsa` | SSH key (used only when Teleport is disabled) |
+   | Password | — | Stored securely; not used by rsync over Teleport keys |
+   | Debounce | `300` | Milliseconds to wait after a change before syncing |
 
-## Sample Configuration
+3. Click **Save**.
+   Settings are saved in VS Code settings. The password is stored in VS Code Secret Storage.
 
-A sample configuration file is provided in `sample-config.json`. You can modify this file to suit your environment:
+## Use the plugin
+
+### 1. Log in to Teleport (browser SSO)
+
+If your company uses Microsoft/SSO authentication, you must log in first.
+
+- Run `SFTP: Teleport Login` (or press **Login to Teleport** in the config UI).
+- The extension runs `tsh login --proxy=<host> --user=<user> [--cluster=<cluster>]`.
+- A browser link appears. The extension opens it in your default browser automatically and also shows the link so you can copy it.
+- Enter your login, password, and the Microsoft Authenticator/2FA code in the browser.
+- When the browser finishes authentication, `tsh` receives the session and the extension shows **Teleport login successful**.
+
+### 2. Test the connection
+
+Run `SFTP: Test Teleport Connection`. It runs `tsh status` and confirms the session is active.
+
+### 3. Sync files
+
+- `SFTP: Sync Now` — run rsync immediately.
+- `SFTP: Dry Run` — preview what rsync would change without applying it.
+- `SFTP: Start Watching` — watch your `localPath` and sync automatically after the debounce delay.
+- `SFTP: Stop Watching` — stop the file watcher.
+
+## How sync works
+
+With Teleport enabled, the extension sets the environment variable `RSYNC_RSH` to `tsh ssh --cluster=<cluster>` and runs:
+
+```bash
+rsync -avz --delete <localPath>/ <sftpUser>@<sftpHost>:<remotePath>/
+```
+
+With Teleport disabled, it uses a normal SSH command with the provided identity file.
+
+## Sample configuration file
+
+`sample-config.json` shows the same structure the extension expects:
 
 ```json
 {
   "teleport": {
     "host": "example.teleport.com",
     "user": "developer",
-    "proxy": "tsh",
     "cluster": "main"
   },
   "sftp": {
     "host": "sftp.example.com",
     "user": "sftp_user",
     "remotePath": "/home/sftp_user/project",
-    "localPath": "./project"
+    "localPath": "/Users/you/project"
   },
   "sync": {
-    "interval": 5000,
-    "debounce": 300
+    "debounceMs": 300
   }
 }
 ```
 
+## Available commands
+
+- `SFTP: Open Configuration`
+- `SFTP: Teleport Login`
+- `SFTP: Test Teleport Connection`
+- `SFTP: Sync Now`
+- `SFTP: Dry Run`
+- `SFTP: Start Watching`
+- `SFTP: Stop Watching`
+
 ## Testing
 
-Unit tests are in `src/test/`. Run them with `npm test`.
+```bash
+npm test
+```
 
-## Contributing
+## Contributing and license
 
-Feel free to contribute by submitting issues or pull requests. For more information, see the [CONTRIBUTING.md](CONTRIBUTING.md) file.
-
-## License
-
-This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
+See [CONTRIBUTING.md](CONTRIBUTING.md) and [LICENSE](LICENSE).
