@@ -159,14 +159,11 @@ function openConfigPanel(context: vscode.ExtensionContext) {
     const htmlPath = path.join(context.extensionPath, 'src', 'webview', 'config.html');
     let html = fs.readFileSync(htmlPath, 'utf8');
 
-    const styleUri = panel.webview.asWebviewUri(
-        vscode.Uri.file(path.join(context.extensionPath, 'src', 'webview', 'config.css'))
-    ).toString();
     const scriptUri = panel.webview.asWebviewUri(
         vscode.Uri.file(path.join(context.extensionPath, 'src', 'webview', 'config.js'))
     ).toString();
 
-    html = html.replace(/{{styleUri}}/g, styleUri).replace(/{{scriptUri}}/g, scriptUri);
+    html = html.replace(/{{scriptUri}}/g, scriptUri);
 
     panel.webview.html = html;
 
@@ -235,7 +232,6 @@ function openConfigPanel(context: vscode.ExtensionContext) {
         }
     });
 
-    panel.webview.postMessage({ command: 'load', config: getConfiguration() });
 }
 
 function openTeleportLink(url: string): void {

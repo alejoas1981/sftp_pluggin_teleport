@@ -2,26 +2,89 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src {{styleUri}} 'unsafe-inline'; script-src {{scriptUri}} 'unsafe-inline';">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src {{scriptUri}} 'unsafe-inline';">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SFTP Configuration</title>
-    <link rel="stylesheet" href="{{styleUri}}">
+    <style>
+        body {
+            font-family: var(--vscode-font-family, Arial, sans-serif);
+            padding: 24px;
+            color: var(--vscode-foreground);
+            background: var(--vscode-editor-background);
+        }
+        h1 { margin-top: 0; font-size: 20px; }
+        p { font-size: 13px; line-height: 1.4; opacity: 0.9; }
+        form {
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+            max-width: 620px;
+        }
+        .field {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        .field label {
+            font-size: 13px;
+            font-weight: 600;
+        }
+        .field input {
+            padding: 8px;
+            font-size: 14px;
+            border: 1px solid var(--vscode-input-border);
+            background: var(--vscode-input-background);
+            color: var(--vscode-input-foreground);
+            border-radius: 2px;
+        }
+        .checkbox-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+            margin-top: 4px;
+        }
+        .checkbox-row input { width: auto; }
+        .actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 10px;
+        }
+        button {
+            padding: 8px 16px;
+            font-size: 13px;
+            cursor: pointer;
+            border: 1px solid var(--vscode-button-border, transparent);
+            background: var(--vscode-button-background);
+            color: var(--vscode-button-foreground);
+            border-radius: 2px;
+        }
+        #status {
+            margin-top: 16px;
+            white-space: pre-wrap;
+            font-size: 13px;
+            min-height: 1.2em;
+        }
+        #status.ok { color: var(--vscode-terminal-ansiGreen); }
+        #status.error { color: var(--vscode-terminal-ansiRed); }
+    </style>
 </head>
 <body>
     <h1>SFTP Configuration</h1>
-    <p>1. Fill the fields → Save. 2. Press "Login to Teleport" for browser SSO. 3. Test, Sync or Start Watching.</p>
+    <p>1. Fill the fields and click Save. 2. Click "Login to Teleport" for browser SSO. 3. Use Test, Dry Run or Sync.</p>
     <form id="config-form">
-        <label>Teleport Host<input type="text" id="teleportHost" placeholder="example.teleport.com"></label>
-        <label>Teleport User<input type="text" id="teleportUser"></label>
-        <label>Teleport Cluster<input type="text" id="teleportCluster" placeholder="main"></label>
-        <label>SFTP Host<input type="text" id="sftpHost"></label>
-        <label>SFTP User<input type="text" id="sftpUser"></label>
-        <label>Remote Path<input type="text" id="remotePath"></label>
-        <label>Local Path<input type="text" id="localPath"></label>
-        <label>Identity File<input type="text" id="identity" placeholder="~/.ssh/id_rsa"></label>
-        <label>Password<input type="password" id="password" placeholder="stored securely"></label>
-        <label>Debounce (ms)<input type="number" id="debounceMs" value="300"></label>
-        <label class="checkbox"><input type="checkbox" id="useTeleport" checked> Use Teleport (tsh)</label>
+        <div class="field"><label for="teleportHost">Teleport Host</label><input type="text" id="teleportHost" placeholder="teleport.example.com:3080"></div>
+        <div class="field"><label for="teleportUser">Teleport User</label><input type="text" id="teleportUser"></div>
+        <div class="field"><label for="teleportCluster">Teleport Cluster</label><input type="text" id="teleportCluster" placeholder="main"></div>
+        <div class="field"><label for="sftpHost">SFTP Host</label><input type="text" id="sftpHost"></div>
+        <div class="field"><label for="sftpUser">SFTP User</label><input type="text" id="sftpUser"></div>
+        <div class="field"><label for="remotePath">Remote Path</label><input type="text" id="remotePath" placeholder="/home/user/project"></div>
+        <div class="field"><label for="localPath">Local Path</label><input type="text" id="localPath" placeholder="/Users/you/project"></div>
+        <div class="field"><label for="identity">Identity File</label><input type="text" id="identity" placeholder="~/.ssh/id_rsa"></div>
+        <div class="field"><label for="password">Password (stored securely)</label><input type="password" id="password" placeholder="leave empty to keep existing"></div>
+        <div class="field"><label for="debounceMs">Debounce (ms)</label><input type="number" id="debounceMs" value="300"></div>
+        <div class="checkbox-row"><input type="checkbox" id="useTeleport" checked><label for="useTeleport">Use Teleport (tsh)</label></div>
         <div class="actions">
             <button type="submit">Save</button>
             <button type="button" id="teleport-login">Login to Teleport</button>

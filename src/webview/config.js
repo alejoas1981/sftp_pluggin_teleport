@@ -16,13 +16,14 @@ const fields = [
 function loadConfig(config) {
     for (const field of fields) {
         const el = document.getElementById(field);
-        if (el && config[field] !== undefined) {
-            el.value = config[field];
+        if (el) {
+            const value = config[field];
+            el.value = value !== undefined && value !== null ? String(value) : '';
         }
     }
     const useTeleport = document.getElementById('useTeleport');
-    if (useTeleport && config.useTeleport !== undefined) {
-        useTeleport.checked = config.useTeleport;
+    if (useTeleport) {
+        useTeleport.checked = config.useTeleport !== undefined ? Boolean(config.useTeleport) : true;
     }
 }
 
@@ -33,6 +34,10 @@ function readConfig() {
         if (el) {
             config[field] = el.value;
         }
+    }
+    const passwordEl = document.getElementById('password');
+    if (passwordEl && passwordEl.value.trim() === '') {
+        config.password = undefined;
     }
     const useTeleport = document.getElementById('useTeleport');
     config.useTeleport = useTeleport ? useTeleport.checked : true;
@@ -87,4 +92,6 @@ window.addEventListener('message', (event) => {
     }
 });
 
-vscode.postMessage({ command: 'ready' });
+window.addEventListener('DOMContentLoaded', () => {
+    vscode.postMessage({ command: 'ready' });
+});
