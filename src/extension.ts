@@ -65,7 +65,7 @@ async function runCommand(action: (config: SftpConfig) => Promise<void> | void):
 
 async function runSyncCommand(config: SftpConfig, dryRun: boolean): Promise<void> {
     if (syncInProgress) {
-        vscode.window.showInformationMessage('SFTP sync already in progress');
+        outputChannel.appendLine('SFTP sync already in progress');
         return;
     }
     if (config.useTeleport !== false) {
@@ -83,7 +83,7 @@ async function runSyncCommand(config: SftpConfig, dryRun: boolean): Promise<void
         const result = await runSync(config, { dryRun });
         outputChannel.appendLine(result);
         updateSftpStatus('$(check) SFTP: ready');
-        vscode.window.showInformationMessage(dryRun ? 'Dry run complete' : 'Sync complete');
+        outputChannel.appendLine(dryRun ? 'Dry run complete' : 'Sync complete');
     } catch (error: any) {
         updateSftpStatus('$(error) SFTP: error');
         throw error;
@@ -97,7 +97,7 @@ async function runTeleportTest(config: SftpConfig): Promise<void> {
     const result = await testTeleport(config);
     outputChannel.appendLine(result);
     updateSftpStatus('$(check) SFTP: ready');
-    vscode.window.showInformationMessage('Teleport session is active');
+    outputChannel.appendLine('Teleport session is active');
 }
 
 async function runTeleportLogin(config: SftpConfig): Promise<void> {
@@ -108,7 +108,7 @@ async function runTeleportLogin(config: SftpConfig): Promise<void> {
     const result = await ensureTeleportSession(config, { onLink: openTeleportLink });
     outputChannel.appendLine(result);
     updateSftpStatus('$(check) SFTP: ready');
-    vscode.window.showInformationMessage('Teleport login successful');
+    outputChannel.appendLine('Teleport login successful');
 }
 
 function startWatcher(context: vscode.ExtensionContext, config: SftpConfig): void {
@@ -136,13 +136,13 @@ function startWatcher(context: vscode.ExtensionContext, config: SftpConfig): voi
 
     startWatching(context, config, doSync, outputChannel);
     updateSftpStatus('$(eye) SFTP: watching');
-    vscode.window.showInformationMessage('SFTP watcher started');
+    outputChannel.appendLine('SFTP watcher started');
 }
 
 function stopWatcher(): void {
     stopWatching();
     updateSftpStatus('$(check) SFTP: ready');
-    vscode.window.showInformationMessage('SFTP watcher stopped');
+    outputChannel.appendLine('SFTP watcher stopped');
 }
 
 function openConfigPanel(context: vscode.ExtensionContext) {
@@ -175,7 +175,7 @@ function openConfigPanel(context: vscode.ExtensionContext) {
             case 'save':
                 await saveConfiguration(context, message.config);
                 panel.webview.postMessage({ command: 'saved' });
-                vscode.window.showInformationMessage('SFTP configuration saved');
+                outputChannel.appendLine('SFTP configuration saved');
                 break;
             case 'login': {
                 try {
