@@ -14,5 +14,5 @@ export function createStatusBar(context: vscode.ExtensionContext): void {
 export function updateSftpStatus(text: string, tooltip?: string): void {
     if (!statusBarItem) { return; }
     statusBarItem.text = text;
-    statusBarItem.tooltip = tooltip || text;
+    statusBarItem.tooltip = tooltip || text.replace(/\$\([^)]+\)\s*/g, '').trim();
 }
