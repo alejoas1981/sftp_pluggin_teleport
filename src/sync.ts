@@ -1,6 +1,10 @@
 import * as cp from 'child_process';
 import { SftpConfig } from './config';
 
+const SESSION_CACHE_MS = 60000;
+
+let cachedSession: { configKey: string; output: string; validUntil: number } | undefined;
+
 export interface SyncOptions {
     dryRun?: boolean;
     cwd?: string;
@@ -91,14 +95,21 @@ export function loginToTeleport(config: SftpConfig, options: LoginOptions = {}):
 }
 
 export async function ensureTeleportSession(config: SftpConfig, options: LoginOptions = {}): Promise<string> {
+    const key = `${config.teleportHost}:${config.teleportUser}:${config.teleportCluster}`;
+    if (cachedSession && cachedSession.configKey === key && Date.now() < cachedSession.validUntil) {
+        return cachedSession.output;
+    }
     try {
         const out = await testTeleport(config);
         if (out.toLowerCase().includes('not logged in')) {
             throw new Error('not logged in');
         }
+        cachedSession = { configKey: key, output: out, validUntil: Date.now() + SESSION_CACHE_MS };
         return out;
     } catch {
-        return loginToTeleport(config, options);
+        const out = await loginToTeleport(config, options);
+        cachedSession = { configKey: key, output: out, validUntil: Date.now() + SESSION_CACHE_MS };
+        return out;
     }
 }
 

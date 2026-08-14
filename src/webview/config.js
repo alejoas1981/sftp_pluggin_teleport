@@ -92,6 +92,12 @@ window.addEventListener('message', (event) => {
     }
 });
 
-window.addEventListener('DOMContentLoaded', () => {
+function notifyReady() {
     vscode.postMessage({ command: 'ready' });
-});
+}
+
+if (document.readyState !== 'loading') {
+    notifyReady();
+} else {
+    window.addEventListener('DOMContentLoaded', notifyReady);
+}
