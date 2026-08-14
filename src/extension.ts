@@ -9,6 +9,7 @@ import { createStatusBar, updateSftpStatus } from './status';
 let outputChannel: vscode.OutputChannel;
 let extensionContext: vscode.ExtensionContext;
 let syncInProgress = false;
+const saveReasons = new Map<string, number>();
 
 export function activate(context: vscode.ExtensionContext) {
     extensionContext = context;
@@ -25,6 +26,7 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.commands.registerCommand('sftpPluggin.testTeleport', () => runCommand(runTeleportTest)),
         vscode.commands.registerCommand('sftpPluggin.startWatching', () => runCommand((cfg) => startWatcher(context, cfg))),
         vscode.commands.registerCommand('sftpPluggin.stopWatching', stopWatcher),
+        vscode.workspace.onWillSaveTextDocument(handleDocumentWillSave),
         vscode.workspace.onDidSaveTextDocument(handleDocumentSave)
     );
 
@@ -245,8 +247,27 @@ function openTeleportLink(url: string): void {
     });
 }
 
+function handleDocumentWillSave(event: vscode.TextDocumentWillSaveEvent): void {
+    saveReasons.set(event.document.uri.toString(), event.reason);
+}
+
 function handleDocumentSave(doc: vscode.TextDocument): void {
     if (doc.uri.scheme !== 'file') { return; }
+    const uri = doc.uri.toString();
+    const reason = saveReasons.get(uri);
+    saveReasons.delete(uri);
+
+    const settings = vscode.workspace.getConfiguration('sftpPluggin');
+    const uploadOnSave = settings.get<boolean>('uploadOnSave', true);
+    const uploadOnAutoSave = settings.get<boolean>('uploadOnAutoSave', false);
+
+    const isManual = reason === vscode.TextDocumentSaveReason.Manual;
+    const isAuto = reason === vscode.TextDocumentSaveReason.AfterDelay || reason === vscode.TextDocumentSaveReason.FocusOut;
+
+    if (isManual && !uploadOnSave) { return; }
+    if (isAuto && !uploadOnAutoSave) { return; }
+    if (reason === undefined && !uploadOnSave) { return; }
+
     const config = getConfiguration();
     if (!config.localPath) { return; }
     let localPath = config.localPath;

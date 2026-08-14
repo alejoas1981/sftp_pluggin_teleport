@@ -3,11 +3,11 @@
   "displayName": "SFTP Plugin",
   "description": "VS Code plugin for SFTP with Teleport integration",
   "version": "0.0.1",
-  "publisher": "Aleksey Savchenko",
+  "publisher": "your-publisher",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/your-publisher/sftp-pluggin"
+    "url": "https://github.com/your-publisher/sftp_pluggin_teleport"
   },
   "engines": {
     "vscode": "^1.80.0"
@@ -50,6 +50,21 @@
         "title": "SFTP: Test Teleport Connection"
       }
     ]
+  },
+  "configuration": {
+    "title": "SFTP Plugin",
+    "properties": {
+      "sftpPluggin.uploadOnSave": {
+        "type": "boolean",
+        "default": true,
+        "description": "Upload current file after manual save (Ctrl+S)"
+      },
+      "sftpPluggin.uploadOnAutoSave": {
+        "type": "boolean",
+        "default": false,
+        "description": "Upload current file after auto-save"
+      }
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",

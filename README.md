@@ -27,7 +27,7 @@ Provides a settings UI, browser SSO login, connection test, one-time sync, dry-r
    | Field | Example | What it means |
    |---|---|---|
    | Teleport Host | `example.teleport.com` | Your Teleport proxy host |
-   | Teleport User | `oleksii.savchenko` | Your Teleport username |
+   | Teleport User | `your-teleport-user` | Your Teleport username |
    | Teleport Cluster | `main` | Teleport cluster name (optional) |
    | SFTP Host | `sftp.example.com` | Target host inside Teleport |
    | SFTP User | `sftp_user` | Username on the target host |
@@ -62,6 +62,15 @@ Run `SFTP: Test Teleport Connection`. It runs `tsh status` and confirms the sess
 - `SFTP: Dry Run` — preview what rsync would change without applying it.
 - `SFTP: Start Watching` — watch your `localPath` and sync automatically after the debounce delay.
 - `SFTP: Stop Watching` — stop the file watcher.
+
+### 4. Upload on save / auto-save
+
+The extension can upload files when you press `Ctrl+S` or when VS Code auto-saves. This is controlled by VS Code settings:
+
+- `sftpPluggin.uploadOnSave` — default `true` — upload after manual save (`Ctrl+S`).
+- `sftpPluggin.uploadOnAutoSave` — default `false` — upload after VS Code auto-save.
+
+Open **Settings** (`Cmd/Ctrl+,`), search for `sftpPluggin`, and toggle the options as needed.
 
 ## How sync works
 
