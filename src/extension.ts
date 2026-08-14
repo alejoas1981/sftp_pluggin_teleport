@@ -157,13 +157,11 @@ function openConfigPanel(context: vscode.ExtensionContext) {
     );
 
     const htmlPath = path.join(context.extensionPath, 'src', 'webview', 'config.html');
+    const jsPath = path.join(context.extensionPath, 'src', 'webview', 'config.js');
     let html = fs.readFileSync(htmlPath, 'utf8');
+    const jsContent = fs.readFileSync(jsPath, 'utf8');
 
-    const scriptUri = panel.webview.asWebviewUri(
-        vscode.Uri.file(path.join(context.extensionPath, 'src', 'webview', 'config.js'))
-    ).toString();
-
-    html = html.replace(/{{scriptUri}}/g, scriptUri);
+    html = html.replace(/{{script}}/g, `<script type="text/javascript">\n${jsContent}\n</script>`);
 
     panel.webview.html = html;
 
