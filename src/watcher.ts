@@ -1,6 +1,5 @@
 import * as vscode from 'vscode';
 import { SftpConfig } from './config';
-import { runSync } from './sync';
 
 let activeWatcher: vscode.FileSystemWatcher | undefined;
 let debounceTimer: NodeJS.Timeout | undefined;
@@ -8,6 +7,7 @@ let debounceTimer: NodeJS.Timeout | undefined;
 export function startWatching(
     context: vscode.ExtensionContext,
     config: SftpConfig,
+    syncFn: () => Promise<void>,
     output: vscode.OutputChannel
 ): void {
     stopWatching();
@@ -27,8 +27,8 @@ export function startWatching(
             clearTimeout(debounceTimer);
         }
         debounceTimer = setTimeout(() => {
-            runSync(config)
-                .then((result) => output.appendLine(result))
+            syncFn()
+                .then(() => output.appendLine('[watch] sync ok'))
                 .catch((error) => output.appendLine(`[sync error] ${error.message}`));
         }, config.debounceMs || 300);
     };

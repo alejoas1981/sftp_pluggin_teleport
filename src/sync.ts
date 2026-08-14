@@ -90,6 +90,18 @@ export function loginToTeleport(config: SftpConfig, options: LoginOptions = {}):
     });
 }
 
+export async function ensureTeleportSession(config: SftpConfig, options: LoginOptions = {}): Promise<string> {
+    try {
+        const out = await testTeleport(config);
+        if (out.toLowerCase().includes('not logged in')) {
+            throw new Error('not logged in');
+        }
+        return out;
+    } catch {
+        return loginToTeleport(config, options);
+    }
+}
+
 function spawnCommand(
     command: string,
     args: string[],
