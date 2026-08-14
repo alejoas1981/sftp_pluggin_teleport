@@ -1,16 +1,15 @@
 {
-  "teleport": {
-    "host": "example.teleport.com",
-    "user": "developer",
-    "cluster": "main"
-  },
-  "sftp": {
-    "host": "sftp.example.com",
-    "user": "sftp_user",
-    "remotePath": "/home/sftp_user/project",
-    "localPath": "/Users/you/project"
-  },
-  "sync": {
-    "debounceMs": 300
-  }
+  "sftpPluggin.teleportHost": "teleport.example.com",
+  "sftpPluggin.teleportUser": "your-teleport-user",
+  "sftpPluggin.teleportCluster": "main",
+  "sftpPluggin.sftpHost": "sftp-node",
+  "sftpPluggin.sftpUser": "your-sftp-user",
+  "sftpPluggin.remotePath": "/home/your-sftp-user/project",
+  "sftpPluggin.localPath": "${workspaceFolder}/project",
+  "sftpPluggin.debounceMs": 300,
+  "sftpPluggin.useTeleport": true,
+  "sftpPluggin.rsyncFlags": "--exclude .git --exclude node_modules",
+  "sftpPluggin.sshFlags": "",
+  "sftpPluggin.uploadOnSave": true,
+  "sftpPluggin.uploadOnAutoSave": false
 }
