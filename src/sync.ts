@@ -228,9 +228,13 @@ export function loginToTeleport(config: SftpConfig, options: LoginOptions = {}):
         const handleData = (data: Buffer): string => {
             const text = data.toString();
             if (options.onLink) {
-                const match = text.match(/https?:\/\/[^\s]+/);
-                if (match) {
-                    options.onLink(match[0]);
+                const proxyHost = config.teleportHost
+                    ? config.teleportHost.replace(/^https?:\/\//, '').split('/')[0]
+                    : undefined;
+                const matches = text.match(/https?:\/\/[^\s]+/g);
+                const url = matches?.find((u) => !proxyHost || u.includes(proxyHost));
+                if (url) {
+                    options.onLink(url);
                 }
             }
             return text;
