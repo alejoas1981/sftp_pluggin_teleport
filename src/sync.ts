@@ -60,7 +60,7 @@ export function buildRsyncCommand(config: SftpConfig, options: SyncOptions = {})
     return { command: 'rsync', args, env };
 }
 
-function buildFtpCommand(config: SftpConfig, options: SyncOptions = {}): SyncCommand {
+export function buildFtpCommand(config: SftpConfig, options: SyncOptions = {}): SyncCommand {
     const user = config.ftpUser || 'anonymous',
         pass = config.password || '',
         host = config.ftpHost || '',

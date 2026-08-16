@@ -1,66 +1,82 @@
-# SFTP Plugin for VS Code (Teleport)
+# FTP / SFTP / Teleport Sync for VS Code
 
-A VS Code extension that synchronizes a local project folder to a remote host over `rsync` through a Teleport (`tsh`) tunnel.
-It handles browser-based SSO login, incremental upload on save, optional auto-save upload, continuous file watching, dry-run preview, and status-bar feedback.
+A single VS Code extension that keeps your local project folder in sync with a remote host — no matter which transport your team or server uses. Pick **FTP**, **SFTP over SSH**, or **Teleport (`tsh`)**, fill the visual configuration panel, and let the extension handle the rest: secure credential storage, incremental transfers, upload-on-save, continuous watching, dry-run preview, and status-bar feedback.
+
+## Why this plugin
+
+Most teams end up with a mix of remote environments: legacy boxes that only speak FTP, modern cloud hosts reachable over plain SSH/SFTP, and corporate infrastructure locked behind Teleport. This extension replaces multiple tools and manual `rsync`/`lftp` commands with one consistent workflow inside VS Code.
+
+- **One UI, three transports.** Switch between FTP, SFTP, and Teleport from a dropdown. The last selected mode is remembered.
+- **Visual config panel.** No need to hand-edit `settings.json`; the `SFTP: Open Configuration` webview writes all fields to your global IDE settings when you click **Save**.
+- **Incremental sync.** Uses `rsync` for SFTP/Teleport and `lftp mirror` for FTP, transferring only changed files.
+- **Upload on save.** Optionally upload the whole `localPath` after every manual `Ctrl+S` or auto-save.
+- **Continuous watching.** Run `SFTP: Start Watching` to sync automatically when files change, with a configurable debounce.
+- **Dry run.** Preview what would happen without changing the remote side.
+- **Secure credentials.** Passwords are stored in VS Code `SecretStorage`; only configuration values live in `settings.json`.
+- **Status bar.** Always see the current state: `logging in`, `syncing`, `watching`, `ready`, or `error`.
 
 ## What you need
 
 - Visual Studio Code 1.80+ or Devin Desktop
-- `tsh` (Teleport client) installed and in `$PATH`
-- `rsync` installed (macOS and Linux include it by default)
-- A Teleport cluster with access to the target SSH/SFTP host
+- One of the following transport clients in your `$PATH`:
+  - **Teleport mode:** `tsh` and `rsync`
+  - **SFTP mode:** `rsync` and `ssh`
+  - **FTP mode:** `lftp`
 
 ## How it works
 
-1. **Activation.** The extension activates on `onStartupFinished`. It immediately reads the `sftpPluggin.*` settings.
-2. **Auto-login.** On startup (and before every sync), the extension runs `tsh status`.
-   - If the Teleport session is active (inside the ~10 hour lifetime), it proceeds.
-   - If the session is missing or expired, it runs `tsh login --proxy=<teleportHost> --user=<teleportUser> [--cluster=<teleportCluster>]`, captures the browser link from `stdout`/`stderr`, and opens it via `vscode.env.openExternal`. You authenticate in the browser (login, password, Microsoft Authenticator/2FA code). When `tsh` receives the certificate, the sync proceeds.
-3. **Upload on save.** The extension listens to `vscode.workspace.onWillSaveTextDocument` and `onDidSaveTextDocument` to determine the save reason (`Manual`, `AfterDelay`, `FocusOut`).
-   - `sftpPluggin.uploadOnSave` (default `true`) controls upload after `Ctrl+S`.
-   - `sftpPluggin.uploadOnAutoSave` (default `false`) controls upload after VS Code auto-save.
-4. **Rsync transfer.** With Teleport enabled the extension sets `RSYNC_RSH="tsh ssh --cluster=<cluster>"` and runs:
-   ```bash
-   rsync -avz --delete <localPath>/ <sftpUser>@<sftpHost>:<remotePath>/
-   ```
-   `rsync` transfers only changed blocks/files, so repeated uploads are fast.
-5. **File watcher.** `SFTP: Start Watching` creates a `vscode.FileSystemWatcher` over `localPath/**`. On each change it debounces for `debounceMs` and then runs the same sync logic, automatically re-logging in if the Teleport session expired.
-6. **Status bar.** A `StatusBarItem` shows the current state: `logging in`, `syncing`, `watching`, `ready`, or `error`.
+1. **Activation.** The extension activates on `onStartupFinished` and reads the `sftpPluggin.*` settings.
+2. **Mode selection.** `sftpPluggin.mode` is `ftp`, `sftp`, or `teleport`. The webview sets and persists this value.
+3. **Connection ready-up.**
+   - **Teleport:** the extension runs `tsh status`; if the session is missing or expired it runs `tsh login --proxy=<teleportHost> --user=<teleportUser> [--cluster=<teleportCluster>]`, captures the browser link, and opens it with `vscode.env.openExternal`.
+   - **SFTP:** `rsync` is invoked through an `ssh` tunnel (optionally using an identity file and extra SSH flags).
+   - **FTP:** `lftp` is invoked with `mirror -R` to push the local tree to the remote path.
+4. **Transfer.** Depending on the mode the extension runs the equivalent of:
+   - `rsync -avz --delete <localPath>/ <sftpUser>@<sftpHost>:<remotePath>/` (SFTP / Teleport)
+   - `lftp -c "open -u <ftpUser>,<password> <ftpHost>; mirror -R ... <localPath> <remotePath>"` (FTP)
+5. **Upload on save.** `onDidSaveTextDocument` triggers a sync for files inside `localPath` when `uploadOnSave` or `uploadOnAutoSave` is enabled.
+6. **File watcher.** `SFTP: Start Watching` watches `localPath/**` and syncs after `debounceMs`.
+7. **Status bar.** The status bar shows the current operation and result.
 
 ## Install the extension
 
-1. Take the built file `sftp-pluggin-0.0.1.vsix`.
+1. Build or download `sftp-pluggin.vsix`.
 2. Open VS Code / Devin Desktop.
 3. Go to the **Extensions** view.
 4. Click the `...` menu and choose **Install from VSIX...**.
-5. Select `sftp-pluggin-0.0.1.vsix`.
+5. Select the `.vsix` file.
 
 ## Full configuration reference
 
-All settings live under the `sftpPluggin` namespace. You can set them via `Settings` (`Cmd/Ctrl+,`), the webview (`SFTP: Open Configuration`), or by editing `.vscode/settings.json` / user `settings.json`.
+All settings live under `sftpPluggin`. You can set them through `Settings` (`Cmd/Ctrl+,`), the `SFTP: Open Configuration` webview, or by editing user `settings.json`.
 
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
+| `sftpPluggin.mode` | `string` | `teleport` | Transport mode: `ftp`, `sftp`, `teleport`. Inferred from `useTeleport` for existing configs. |
 | `sftpPluggin.teleportHost` | `string` | `undefined` | Teleport proxy host, e.g. `teleport.example.com` |
-| `sftpPluggin.teleportUser` | `string` | `undefined` | Your Teleport username, e.g. `your-teleport-user` |
+| `sftpPluggin.teleportUser` | `string` | `undefined` | Your Teleport username |
 | `sftpPluggin.teleportCluster` | `string` | `undefined` | Teleport cluster name, e.g. `main` |
-| `sftpPluggin.sftpHost` | `string` | `undefined` | Target host inside Teleport, e.g. `sftp-node` |
+| `sftpPluggin.sftpHost` | `string` | `undefined` | Target SSH/SFTP host (also used as the Teleport target) |
 | `sftpPluggin.sftpUser` | `string` | `undefined` | Username on the target host |
+| `sftpPluggin.ftpHost` | `string` | `undefined` | FTP server host, e.g. `ftp.example.com` |
+| `sftpPluggin.ftpUser` | `string` | `undefined` | FTP username |
 | `sftpPluggin.remotePath` | `string` | `undefined` | Destination directory on the remote host, e.g. `/home/user/project` |
 | `sftpPluggin.localPath` | `string` | `undefined` | Local directory to sync from; can be absolute or relative to the first workspace folder |
-| `sftpPluggin.identity` | `string` | `undefined` | SSH private key path, used only when `useTeleport` is `false` |
-| `sftpPluggin.password` | `string` | `undefined` | Stored in VS Code `SecretStorage`; not used when Teleport is enabled |
+| `sftpPluggin.identity` | `string` | `undefined` | SSH private key path, used only in `sftp` mode |
+| `sftpPluggin.password` | `string` | `undefined` | Stored in VS Code `SecretStorage`; used for FTP login and hidden from `settings.json` |
 | `sftpPluggin.debounceMs` | `number` | `300` | Milliseconds to wait after a watcher event before syncing |
-| `sftpPluggin.useTeleport` | `boolean` | `true` | Whether to tunnel rsync through `tsh ssh` |
-| `sftpPluggin.rsyncFlags` | `string` | `undefined` | Extra rsync flags, e.g. `--exclude .git --checksum` |
-| `sftpPluggin.sshFlags` | `string` | `undefined` | Extra SSH flags for non-Teleport mode |
-| `sftpPluggin.uploadOnSave` | `boolean` | `true` | Upload the saved file after a manual `Ctrl+S` |
-| `sftpPluggin.uploadOnAutoSave` | `boolean` | `false` | Upload the saved file after VS Code auto-save (`files.autoSave` must be enabled) |
+| `sftpPluggin.rsyncFlags` | `string` | `undefined` | Extra rsync flags for `sftp`/`teleport` modes, e.g. `--exclude .git --checksum` |
+| `sftpPluggin.sshFlags` | `string` | `undefined` | Extra SSH flags for `sftp` mode, e.g. `-p 2222` |
+| `sftpPluggin.uploadOnSave` | `boolean` | `true` | Upload the saved file's tree after a manual `Ctrl+S` |
+| `sftpPluggin.uploadOnAutoSave` | `boolean` | `false` | Upload the saved file's tree after VS Code auto-save |
 
-## Sample `.vscode/settings.json`
+## Sample `settings.json`
+
+### Teleport
 
 ```json
 {
+  "sftpPluggin.mode": "teleport",
   "sftpPluggin.teleportHost": "teleport.example.com",
   "sftpPluggin.teleportUser": "your-teleport-user",
   "sftpPluggin.teleportCluster": "main",
@@ -69,24 +85,49 @@ All settings live under the `sftpPluggin` namespace. You can set them via `Setti
   "sftpPluggin.remotePath": "/home/your-sftp-user/project",
   "sftpPluggin.localPath": "${workspaceFolder}/project",
   "sftpPluggin.debounceMs": 300,
-  "sftpPluggin.useTeleport": true,
   "sftpPluggin.rsyncFlags": "--exclude .git --exclude node_modules",
   "sftpPluggin.uploadOnSave": true,
   "sftpPluggin.uploadOnAutoSave": false
 }
 ```
 
+### SFTP over SSH
+
+```json
+{
+  "sftpPluggin.mode": "sftp",
+  "sftpPluggin.sftpHost": "sftp.example.com",
+  "sftpPluggin.sftpUser": "deploy",
+  "sftpPluggin.identity": "~/.ssh/id_rsa",
+  "sftpPluggin.sshFlags": "-p 2222",
+  "sftpPluggin.remotePath": "/var/www/project",
+  "sftpPluggin.localPath": "${workspaceFolder}",
+  "sftpPluggin.rsyncFlags": "--exclude .git --exclude node_modules",
+  "sftpPluggin.uploadOnSave": true
+}
+```
+
+### FTP
+
+```json
+{
+  "sftpPluggin.mode": "ftp",
+  "sftpPluggin.ftpHost": "ftp.example.com",
+  "sftpPluggin.ftpUser": "deploy",
+  "sftpPluggin.remotePath": "/public_html/project",
+  "sftpPluggin.localPath": "${workspaceFolder}",
+  "sftpPluggin.uploadOnSave": true
+}
+```
+
 ## Step-by-step usage
 
-1. Open `SFTP: Open Configuration` from the Command Palette, fill the form, and click **Save**.
-2. Press `Ctrl+S` or run `SFTP: Sync Now`.
-   - If the Teleport session is not active, a browser link opens.
-   - Log in through the browser (login, password, Microsoft Authenticator/2FA code).
-   - The extension confirms `Teleport login successful`.
-3. The file is uploaded with `rsync`.
-4. From now on `Ctrl+S` in any file inside `localPath` uploads the project automatically.
-5. To upload on VS Code auto-save, enable `files.autoSave` and set `sftpPluggin.uploadOnAutoSave` to `true`.
-6. To sync on every file change without saving, run `SFTP: Start Watching`.
+1. Open `SFTP: Open Configuration` from the Command Palette.
+2. Select the transport mode from the **Connection Mode** dropdown and fill the visible fields.
+3. Click **Save**. All values are written to your global `settings.json` automatically.
+4. Use **Login to Teleport** / **Test Teleport** when in `teleport` mode, or jump straight to **Dry Run** / **Sync Now**.
+5. Press `Ctrl+S` in any file inside `localPath` to trigger an automatic upload.
+6. To auto-upload on every change, run `SFTP: Start Watching`.
 
 ## Commands
 
@@ -104,9 +145,17 @@ All settings live under the `sftpPluggin` namespace. You can set them via `Setti
 npm test
 ```
 
+The test suite covers command building for all three modes, configuration validation, the webview UI interaction, the progress renderer, and the `saveConfiguration` flow that writes every GUI field to the global settings.
+
 ## Notes on the Teleport session
 
-A Teleport session is valid for about 10 hours. The extension checks the session before every sync, so when it expires, the next `Ctrl+S`, `Sync Now`, or watcher-triggered sync automatically starts `tsh login` again and opens the browser. You only need to authenticate again in the browser.
+A Teleport session is valid for about 10 hours. The extension checks the session before every sync, so when it expires the next `Ctrl+S`, `Sync Now`, or watcher-triggered sync automatically starts `tsh login` again and opens the browser. You only need to authenticate again in the browser.
+
+## Security
+
+- Configuration is stored in `settings.json` and is safe to share and version-control (no secrets).
+- Passwords are stored in VS Code `SecretStorage` and never appear in `settings.json`.
+- The `password` field in the webview is a secret input; leaving it empty keeps the existing stored password.
 
 ## Contributing and license
 

@@ -71,7 +71,7 @@
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
-    "test": "mocha --require ts-node/register 'src/test/**/*.test.ts'"
+    "test": "mocha --require ts-node/register --require src/test/setup.js 'src/test/**/*.test.ts'"
   },
   "devDependencies": {
     "@types/chai": "4.3.11",
