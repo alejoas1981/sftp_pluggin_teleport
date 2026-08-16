@@ -7,4 +7,5 @@ node_modules/
 npm-cache/
 vscode-sftp-plugin/
 *.vsix
+!build/*.vsix
 .windsurfrules
