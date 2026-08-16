@@ -219,7 +219,7 @@ export function loginToTeleport(config: SftpConfig, options: LoginOptions = {}):
     const args: string[] = ['login'];
     if (config.teleportHost) { args.push(`--proxy=${config.teleportHost}`); }
     if (config.teleportUser) { args.push(`--user=${config.teleportUser}`); }
-    if (config.teleportCluster) { args.push(`--cluster=${config.teleportCluster}`); }
+    if (config.teleportCluster) { args.push(config.teleportCluster); }
 
     return new Promise<string>((resolve, reject) => {
         const child = cp.spawn('tsh', args, { env: process.env });
@@ -270,8 +270,9 @@ export async function ensureTeleportSession(config: SftpConfig, options: LoginOp
     }
     try {
         const out = await testTeleport(config);
-        if (out.toLowerCase().includes('not logged in')) {
-            throw new Error('not logged in');
+        const lowerOut = out.toLowerCase();
+        if (['not logged in', 'expired', 'relogin', 'session expired'].some((msg) => lowerOut.includes(msg))) {
+            throw new Error('Teleport session not active');
         }
         cachedSession = { configKey: key, output: out, validUntil: Date.now() + SESSION_CACHE_MS };
         return out;
