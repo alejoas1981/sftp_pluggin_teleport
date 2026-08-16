@@ -1,15 +1,19 @@
 const vscode = acquireVsCodeApi(),
     fields = [
+        'mode',
         'teleportHost',
         'teleportUser',
         'teleportCluster',
         'sftpHost',
         'sftpUser',
+        'ftpHost',
+        'ftpUser',
         'remotePath',
         'localPath',
         'identity',
-        'password',
-        'debounceMs'
+        'debounceMs',
+        'sshFlags',
+        'rsyncFlags'
     ],
     loader = document.getElementById('loader'),
     progressBar = document.getElementById('progress-bar'),
@@ -25,10 +29,9 @@ function loadConfig(config) {
             el.value = value !== undefined && value !== null ? String(value) : '';
         }
     }
-    const useTeleport = document.getElementById('useTeleport');
-    if (useTeleport) {
-        useTeleport.checked = config.useTeleport !== undefined ? Boolean(config.useTeleport) : true;
-    }
+    const passwordEl = document.getElementById('password');
+    if (passwordEl) { passwordEl.value = ''; }
+    updateModeFields();
 }
 
 function readConfig() {
@@ -36,16 +39,38 @@ function readConfig() {
     for (const field of fields) {
         const el = document.getElementById(field);
         if (el) {
-            config[field] = el.value;
+            if (field === 'debounceMs') {
+                config[field] = Number(el.value) || 300;
+            } else {
+                config[field] = el.value;
+            }
         }
     }
-    const passwordEl = document.getElementById('password'),
-        useTeleport = document.getElementById('useTeleport');
+    const passwordEl = document.getElementById('password');
     if (passwordEl && passwordEl.value.trim() === '') {
         config.password = undefined;
+    } else if (passwordEl) {
+        config.password = passwordEl.value;
     }
-    config.useTeleport = useTeleport ? useTeleport.checked : true;
     return config;
+}
+
+function updateModeFields() {
+    const mode = document.getElementById('mode').value;
+    const nodes = document.querySelectorAll('[data-mode]');
+    for (let i = 0; i < nodes.length; i++) {
+        const el = nodes[i];
+        const modes = (el.getAttribute('data-mode') || '').split(',').map(m => m.trim());
+        if (modes.indexOf(mode) >= 0) {
+            el.classList.remove('hidden');
+            el.style.display = '';
+            el.disabled = false;
+        } else {
+            el.classList.add('hidden');
+            el.style.display = 'none';
+            el.disabled = true;
+        }
+    }
 }
 
 function setStatus(text, type) {
@@ -94,6 +119,10 @@ document.getElementById('config-form').addEventListener('submit', (event) => {
     event.preventDefault();
     startProgress();
     vscode.postMessage({ command: 'save', config: readConfig() });
+});
+
+document.getElementById('mode').addEventListener('change', () => {
+    updateModeFields();
 });
 
 document.getElementById('teleport-login').addEventListener('click', () => {

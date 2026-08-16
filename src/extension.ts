@@ -144,7 +144,7 @@ function stopWatcher(): void {
 function openConfigPanel(context: vscode.ExtensionContext) {
     const panel = vscode.window.createWebviewPanel(
         'sftpConfig',
-        'SFTP Configuration',
+        'FTP / SFTP / Teleport Configuration',
         vscode.ViewColumn.One,
         {
             enableScripts: true,

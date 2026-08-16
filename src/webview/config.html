@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline';">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SFTP Configuration</title>
+    <title>FTP SFTP Teleport Config</title>
     <style>
         body {
             font-family: var(--vscode-font-family, Arial, sans-serif);
@@ -25,11 +25,13 @@
             flex-direction: column;
             gap: 4px;
         }
+        .field.hidden { display: none; }
         .field label {
             font-size: 13px;
             font-weight: 600;
         }
-        .field input {
+        .field input,
+        .field select {
             padding: 8px;
             font-size: 14px;
             border: 1px solid var(--vscode-input-border);
@@ -104,24 +106,35 @@
     </style>
 </head>
 <body>
-    <h1>SFTP Configuration</h1>
-    <p>1. Fill the fields and click Save. 2. Click "Login to Teleport" for browser SSO. 3. Use Test, Dry Run or Sync.</p>
+    <h1>FTP SFTP Teleport Config</h1>
+    <p>1. Select mode, fill the fields and click Save. 2. Login or Test as needed. 3. Sync or Dry Run.</p>
     <form id="config-form">
-        <div class="field"><label for="teleportHost">Teleport Host</label><input type="text" id="teleportHost" placeholder="teleport.example.com:3080"></div>
-        <div class="field"><label for="teleportUser">Teleport User</label><input type="text" id="teleportUser"></div>
-        <div class="field"><label for="teleportCluster">Teleport Cluster</label><input type="text" id="teleportCluster" placeholder="main"></div>
-        <div class="field"><label for="sftpHost">SFTP Host</label><input type="text" id="sftpHost"></div>
-        <div class="field"><label for="sftpUser">SFTP User</label><input type="text" id="sftpUser"></div>
+        <div class="field">
+            <label for="mode">Connection Mode</label>
+            <select id="mode">
+                <option value="teleport">Teleport</option>
+                <option value="sftp">SFTP (SSH)</option>
+                <option value="ftp">FTP</option>
+            </select>
+        </div>
+        <div class="field" data-mode="teleport"><label for="teleportHost">Teleport Host</label><input type="text" id="teleportHost" placeholder="teleport.example.com:3080"></div>
+        <div class="field" data-mode="teleport"><label for="teleportUser">Teleport User</label><input type="text" id="teleportUser"></div>
+        <div class="field" data-mode="teleport"><label for="teleportCluster">Teleport Cluster</label><input type="text" id="teleportCluster" placeholder="main"></div>
+        <div class="field" data-mode="sftp"><label for="sftpHost">SFTP Host</label><input type="text" id="sftpHost"></div>
+        <div class="field" data-mode="sftp"><label for="sftpUser">SFTP User</label><input type="text" id="sftpUser"></div>
+        <div class="field" data-mode="ftp"><label for="ftpHost">FTP Host</label><input type="text" id="ftpHost"></div>
+        <div class="field" data-mode="ftp"><label for="ftpUser">FTP User</label><input type="text" id="ftpUser"></div>
         <div class="field"><label for="remotePath">Remote Path</label><input type="text" id="remotePath" placeholder="/home/user/project"></div>
         <div class="field"><label for="localPath">Local Path</label><input type="text" id="localPath" placeholder="/Users/you/project"></div>
-        <div class="field"><label for="identity">Identity File</label><input type="text" id="identity" placeholder="~/.ssh/id_rsa"></div>
+        <div class="field" data-mode="sftp"><label for="identity">Identity File</label><input type="text" id="identity" placeholder="~/.ssh/id_rsa"></div>
         <div class="field"><label for="password">Password (stored securely)</label><input type="password" id="password" placeholder="leave empty to keep existing"></div>
         <div class="field"><label for="debounceMs">Debounce (ms)</label><input type="number" id="debounceMs" value="300"></div>
-        <div class="checkbox-row"><input type="checkbox" id="useTeleport" checked><label for="useTeleport">Use Teleport (tsh)</label></div>
+        <div class="field" data-mode="sftp,teleport"><label for="sshFlags">Extra SSH Flags</label><input type="text" id="sshFlags" placeholder="-o StrictHostKeyChecking=no"></div>
+        <div class="field" data-mode="sftp,teleport"><label for="rsyncFlags">Extra Rsync Flags</label><input type="text" id="rsyncFlags" placeholder="--exclude .git"></div>
         <div class="actions">
             <button type="submit" id="btn-save">Save</button>
-            <button type="button" id="teleport-login">Login to Teleport</button>
-            <button type="button" id="test-teleport">Test Teleport</button>
+            <button type="button" id="teleport-login" data-mode="teleport">Login to Teleport</button>
+            <button type="button" id="test-teleport" data-mode="teleport">Test Teleport</button>
             <button type="button" id="dry-run">Dry Run</button>
             <button type="button" id="sync-now">Sync Now</button>
         </div>
