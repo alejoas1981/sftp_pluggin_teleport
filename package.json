@@ -3,12 +3,16 @@
   "displayName": "SFTP Plugin",
   "description": "VS Code plugin for SFTP with Teleport integration",
   "version": "2.1.0",
-  "publisher": "your-publisher",
+  "publisher": "alejoas1981",
+  "author": {
+    "name": "Savchenko Aleksey",
+    "email": "alejoas1981@gmail.com"
+  },
   "license": "MIT",
   "icon": "sftp_teleport.png",
   "repository": {
     "type": "git",
-    "url": "https://github.com/your-publisher/sftp_pluggin_teleport"
+    "url": "https://github.com/alejoas1981/sftp_pluggin_teleport"
   },
   "engines": {
     "vscode": "^1.80.0"

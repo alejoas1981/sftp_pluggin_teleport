@@ -1,5 +1,6 @@
 const vscode = acquireVsCodeApi(),
     settingsLinkEl = document.getElementById('settings-link'),
+    teleportLoginEl = document.getElementById('teleport-login'),
     fields = [
         'mode',
         'teleportHost',
@@ -209,10 +210,12 @@ document.getElementById('mode').addEventListener('change', () => {
     updateModeFields();
 });
 
-document.getElementById('teleport-login').addEventListener('click', () => {
-    startProgress();
-    vscode.postMessage({ command: 'login' });
-});
+if (teleportLoginEl) {
+    teleportLoginEl.addEventListener('click', () => {
+        startProgress();
+        vscode.postMessage({ command: 'login' });
+    });
+}
 
 document.getElementById('test-connection').addEventListener('click', () => {
     startProgress();
@@ -241,6 +244,7 @@ window.addEventListener('message', (event) => {
             loadConfig(message.config);
             const modeEl = document.getElementById('mode');
             if (modeEl) { modeEl.disabled = !!message.hasSavedConfig; }
+            if (teleportLoginEl) { teleportLoginEl.hidden = !!message.isLoggedIn; }
             if (message.hasPassword) {
                 const passwordEl = document.getElementById('password'),
                     savePasswordEl = document.getElementById('save-password');
@@ -259,6 +263,7 @@ window.addEventListener('message', (event) => {
             break;
         case 'loginResult':
         case 'testResult':
+            if (message.status === 'ok' && teleportLoginEl) { teleportLoginEl.hidden = true; }
         case 'syncResult':
             stopProgress();
             setStatus(message.detail, message.status);

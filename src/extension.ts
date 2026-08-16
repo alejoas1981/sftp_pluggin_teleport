@@ -228,7 +228,11 @@ function openConfigPanel(context: vscode.ExtensionContext) {
                     sectionConfig = vscode.workspace.getConfiguration('sftpPluggin'),
                     modeInspect = sectionConfig.inspect('mode'),
                     hasSavedConfig = modeInspect ? modeInspect.workspaceValue !== undefined : false;
-                panel.webview.postMessage({ command: 'load', config: cfg, hasPassword, hasSavedConfig });
+                let isLoggedIn = false;
+                if (cfg.mode === 'teleport' && cfg.teleportHost && cfg.teleportUser) {
+                    isLoggedIn = await testConnection(cfg).then(() => true).catch(() => false);
+                }
+                panel.webview.postMessage({ command: 'load', config: cfg, hasPassword, hasSavedConfig, isLoggedIn });
                 break;
             }
             case 'save': {
