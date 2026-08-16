@@ -27,8 +27,8 @@ export function buildRsyncCommand(config: SftpConfig, options: SyncOptions = {})
         args.push(...config.rsyncFlags.split(' ').filter(Boolean));
     }
 
-    const local = (config.localPath || '').replace(/\/+$/, '') + '/';
-    const remotePath = (config.remotePath || '').replace(/\/+$/, '') + '/';
+    const local = (config.localPath || '').replace(/\/+$/, '') + '/',
+        remotePath = (config.remotePath || '').replace(/\/+$/, '') + '/';
     const remote = `${config.sftpUser}@${config.sftpHost}:${remotePath}`;
     args.push(local, remote);
 
@@ -66,8 +66,7 @@ export function loginToTeleport(config: SftpConfig, options: LoginOptions = {}):
 
     return new Promise<string>((resolve, reject) => {
         const child = cp.spawn('tsh', args, { env: process.env });
-        let stdout = '';
-        let stderr = '';
+        let stdout = '', stderr = '';
 
         const handleData = (data: Buffer): string => {
             const text = data.toString();
@@ -120,8 +119,7 @@ function spawnCommand(
 ): Promise<string> {
     return new Promise<string>((resolve, reject) => {
         const child = cp.spawn(command, args, { env: options.env, cwd: options.cwd });
-        let stdout = '';
-        let stderr = '';
+        let stdout = '', stderr = '';
         child.stdout.on('data', (data) => { stdout += data.toString(); });
         child.stderr.on('data', (data) => { stderr += data.toString(); });
         child.on('error', reject);

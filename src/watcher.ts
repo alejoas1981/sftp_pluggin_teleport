@@ -1,8 +1,7 @@
 import * as vscode from 'vscode';
 import { SftpConfig } from './config';
 
-let activeWatcher: vscode.FileSystemWatcher | undefined;
-let debounceTimer: NodeJS.Timeout | undefined;
+let activeWatcher: vscode.FileSystemWatcher | undefined, debounceTimer: NodeJS.Timeout | undefined;
 
 export function startWatching(
     context: vscode.ExtensionContext,
@@ -16,8 +15,7 @@ export function startWatching(
         throw new Error('localPath is required to start watching');
     }
 
-    const base = vscode.Uri.file(config.localPath);
-    const pattern = new vscode.RelativePattern(base, '**');
+    const base = vscode.Uri.file(config.localPath), pattern = new vscode.RelativePattern(base, '**');
 
     activeWatcher = vscode.workspace.createFileSystemWatcher(pattern, false, false, false);
 

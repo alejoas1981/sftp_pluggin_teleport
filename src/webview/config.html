@@ -72,6 +72,35 @@
         }
         #status.ok { color: var(--vscode-terminal-ansiGreen); }
         #status.error { color: var(--vscode-terminal-ansiRed); }
+        #loader { display: none; margin-top: 16px; }
+        .progress-outer {
+            display: inline-block;
+            border: 2px solid;
+            border-color: #808080 #ffffff #ffffff #808080;
+            background: #c0c0c0;
+            padding: 4px;
+        }
+        .progress-bar {
+            display: flex;
+            width: 240px;
+            height: 20px;
+            background: #c0c0c0;
+        }
+        .progress-block {
+            flex: 1;
+            height: 100%;
+            background: #c0c0c0;
+            border-right: 1px solid #808080;
+            border-bottom: 1px solid #808080;
+        }
+        .progress-block.active {
+            background: #000080;
+        }
+        .progress-label {
+            margin-top: 6px;
+            font-size: 13px;
+            font-family: var(--vscode-font-family, monospace);
+        }
     </style>
 </head>
 <body>
@@ -98,6 +127,12 @@
         </div>
     </form>
     <div id="status"></div>
+    <div id="loader">
+        <div class="progress-outer">
+            <div id="progress-bar" class="progress-bar"></div>
+        </div>
+        <div class="progress-label">Loading <span id="progress-percent">0%</span></div>
+    </div>
     {{script}}
 </body>
 </html>

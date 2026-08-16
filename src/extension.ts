@@ -4,11 +4,9 @@ import * as fs from 'fs';
 import { getConfiguration, saveConfiguration, getPassword, SftpConfig } from './config';
 import { runSync, testTeleport, ensureTeleportSession } from './sync';
 import { startWatching, stopWatching } from './watcher';
-import { createStatusBar, updateSftpStatus } from './status';
+import { createStatusBar, updateSftpStatus, startLoading, stopLoading } from './status';
 
-let outputChannel: vscode.OutputChannel;
-let extensionContext: vscode.ExtensionContext;
-let syncInProgress = false;
+let outputChannel: vscode.OutputChannel, extensionContext: vscode.ExtensionContext, syncInProgress = false;
 const saveReasons = new Map<string, number>();
 
 export function activate(context: vscode.ExtensionContext) {
@@ -39,17 +37,16 @@ export function activate(context: vscode.ExtensionContext) {
 async function autoLogin(): Promise<void> {
     const config = await loadConfig();
     if (config.useTeleport === false || !config.teleportHost) {
-        updateSftpStatus('$(check) SFTP: ready');
+        stopLoading();
         return;
     }
-    updateSftpStatus('$(sync) SFTP: checking Teleport...');
+    startLoading();
     await ensureTeleportSession(config, { onLink: openTeleportLink });
-    updateSftpStatus('$(check) SFTP: ready');
+    stopLoading();
 }
 
 async function loadConfig(): Promise<SftpConfig> {
-    const base = getConfiguration();
-    const password = await getPassword(extensionContext);
+    const base = getConfiguration(), password = await getPassword(extensionContext);
     return { ...base, password } as SftpConfig;
 }
 
@@ -74,18 +71,17 @@ async function runSyncCommand(config: SftpConfig, dryRun: boolean): Promise<void
         }
     }
     syncInProgress = true;
-    updateSftpStatus('$(sync) SFTP: logging in...');
+    startLoading();
     try {
         if (config.useTeleport !== false) {
             await ensureTeleportSession(config, { onLink: openTeleportLink });
         }
-        updateSftpStatus(`$(sync) SFTP: ${dryRun ? 'dry-run' : 'syncing'}...`);
         const result = await runSync(config, { dryRun });
         outputChannel.appendLine(result);
-        updateSftpStatus('$(check) SFTP: ready');
+        stopLoading();
         outputChannel.appendLine(dryRun ? 'Dry run complete' : 'Sync complete');
     } catch (error: any) {
-        updateSftpStatus('$(error) SFTP: error');
+        stopLoading('$(error) SFTP: error');
         throw error;
     } finally {
         syncInProgress = false;
@@ -93,10 +89,10 @@ async function runSyncCommand(config: SftpConfig, dryRun: boolean): Promise<void
 }
 
 async function runTeleportTest(config: SftpConfig): Promise<void> {
-    updateSftpStatus('$(sync) SFTP: checking...');
+    startLoading();
     const result = await testTeleport(config);
     outputChannel.appendLine(result);
-    updateSftpStatus('$(check) SFTP: ready');
+    stopLoading();
     outputChannel.appendLine('Teleport session is active');
 }
 
@@ -104,10 +100,10 @@ async function runTeleportLogin(config: SftpConfig): Promise<void> {
     if (config.useTeleport === false || !config.teleportHost || !config.teleportUser) {
         throw new Error('Teleport host and user are required');
     }
-    updateSftpStatus('$(sync) SFTP: logging in...');
+    startLoading();
     const result = await ensureTeleportSession(config, { onLink: openTeleportLink });
     outputChannel.appendLine(result);
-    updateSftpStatus('$(check) SFTP: ready');
+    stopLoading();
     outputChannel.appendLine('Teleport login successful');
 }
 
@@ -115,7 +111,7 @@ function startWatcher(context: vscode.ExtensionContext, config: SftpConfig): voi
     const doSync = async (): Promise<void> => {
         if (syncInProgress) { return; }
         syncInProgress = true;
-        updateSftpStatus('$(sync) SFTP: syncing...');
+        startLoading();
         try {
             if (config.useTeleport !== false) {
                 if (!config.teleportHost || !config.teleportUser) {
@@ -125,9 +121,9 @@ function startWatcher(context: vscode.ExtensionContext, config: SftpConfig): voi
             }
             const result = await runSync(config);
             outputChannel.appendLine(result);
-            updateSftpStatus('$(eye) SFTP: watching');
+            stopLoading('$(eye) SFTP: watching');
         } catch (error: any) {
-            updateSftpStatus('$(error) SFTP: error');
+            stopLoading('$(error) SFTP: error');
             throw error;
         } finally {
             syncInProgress = false;
@@ -135,13 +131,13 @@ function startWatcher(context: vscode.ExtensionContext, config: SftpConfig): voi
     };
 
     startWatching(context, config, doSync, outputChannel);
-    updateSftpStatus('$(eye) SFTP: watching');
+    stopLoading('$(eye) SFTP: watching');
     outputChannel.appendLine('SFTP watcher started');
 }
 
 function stopWatcher(): void {
     stopWatching();
-    updateSftpStatus('$(check) SFTP: ready');
+    stopLoading();
     outputChannel.appendLine('SFTP watcher stopped');
 }
 
@@ -156,8 +152,8 @@ function openConfigPanel(context: vscode.ExtensionContext) {
         }
     );
 
-    const htmlPath = path.join(context.extensionPath, 'src', 'webview', 'config.html');
-    const jsPath = path.join(context.extensionPath, 'src', 'webview', 'config.js');
+    const htmlPath = path.join(context.extensionPath, 'src', 'webview', 'config.html'),
+        jsPath = path.join(context.extensionPath, 'src', 'webview', 'config.js');
     let html = fs.readFileSync(htmlPath, 'utf8');
     const jsContent = fs.readFileSync(jsPath, 'utf8');
 
@@ -181,26 +177,26 @@ function openConfigPanel(context: vscode.ExtensionContext) {
                     if (cfg.useTeleport === false || !cfg.teleportHost || !cfg.teleportUser) {
                         throw new Error('Teleport host and user are required');
                     }
-                    updateSftpStatus('$(sync) SFTP: logging in...');
+                    startLoading();
                     const result = await ensureTeleportSession(cfg, { onLink: openTeleportLink });
                     outputChannel.appendLine(result);
                     panel.webview.postMessage({ command: 'loginResult', status: 'ok', detail: 'Login successful' });
-                    updateSftpStatus('$(check) SFTP: ready');
+                    stopLoading();
                 } catch (error: any) {
                     panel.webview.postMessage({ command: 'loginResult', status: 'error', detail: error.message });
-                    updateSftpStatus('$(error) SFTP: error');
+                    stopLoading('$(error) SFTP: error');
                 }
                 break;
             }
             case 'test': {
                 try {
                     const cfg = await loadConfig();
-                    updateSftpStatus('$(sync) SFTP: checking...');
+                    startLoading();
                     const result = await testTeleport(cfg);
-                    updateSftpStatus('$(check) SFTP: ready');
+                    stopLoading();
                     panel.webview.postMessage({ command: 'testResult', status: 'ok', detail: result });
                 } catch (error: any) {
-                    updateSftpStatus('$(error) SFTP: error');
+                    stopLoading('$(error) SFTP: error');
                     panel.webview.postMessage({ command: 'testResult', status: 'error', detail: error.message });
                 }
                 break;
@@ -247,16 +243,16 @@ function handleDocumentWillSave(event: vscode.TextDocumentWillSaveEvent): void {
 
 function handleDocumentSave(doc: vscode.TextDocument): void {
     if (doc.uri.scheme !== 'file') { return; }
-    const uri = doc.uri.toString();
-    const reason = saveReasons.get(uri);
+    const uri = doc.uri.toString(),
+        reason = saveReasons.get(uri);
     saveReasons.delete(uri);
 
-    const settings = vscode.workspace.getConfiguration('sftpPluggin');
-    const uploadOnSave = settings.get<boolean>('uploadOnSave', true);
-    const uploadOnAutoSave = settings.get<boolean>('uploadOnAutoSave', false);
+    const settings = vscode.workspace.getConfiguration('sftpPluggin'),
+        uploadOnSave = settings.get<boolean>('uploadOnSave', true),
+        uploadOnAutoSave = settings.get<boolean>('uploadOnAutoSave', false);
 
-    const isManual = reason === vscode.TextDocumentSaveReason.Manual;
-    const isAuto = reason === vscode.TextDocumentSaveReason.AfterDelay || reason === vscode.TextDocumentSaveReason.FocusOut;
+    const isManual = reason === vscode.TextDocumentSaveReason.Manual,
+        isAuto = reason === vscode.TextDocumentSaveReason.AfterDelay || reason === vscode.TextDocumentSaveReason.FocusOut;
 
     if (isManual && !uploadOnSave) { return; }
     if (isAuto && !uploadOnAutoSave) { return; }

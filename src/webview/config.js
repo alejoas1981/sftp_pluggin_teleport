@@ -1,17 +1,21 @@
-const vscode = acquireVsCodeApi();
-
-const fields = [
-    'teleportHost',
-    'teleportUser',
-    'teleportCluster',
-    'sftpHost',
-    'sftpUser',
-    'remotePath',
-    'localPath',
-    'identity',
-    'password',
-    'debounceMs'
-];
+const vscode = acquireVsCodeApi(),
+    fields = [
+        'teleportHost',
+        'teleportUser',
+        'teleportCluster',
+        'sftpHost',
+        'sftpUser',
+        'remotePath',
+        'localPath',
+        'identity',
+        'password',
+        'debounceMs'
+    ],
+    loader = document.getElementById('loader'),
+    progressBar = document.getElementById('progress-bar'),
+    progressPercent = document.getElementById('progress-percent'),
+    statusEl = document.getElementById('status');
+let progressInterval = null;
 
 function loadConfig(config) {
     for (const field of fields) {
@@ -35,43 +39,80 @@ function readConfig() {
             config[field] = el.value;
         }
     }
-    const passwordEl = document.getElementById('password');
+    const passwordEl = document.getElementById('password'),
+        useTeleport = document.getElementById('useTeleport');
     if (passwordEl && passwordEl.value.trim() === '') {
         config.password = undefined;
     }
-    const useTeleport = document.getElementById('useTeleport');
     config.useTeleport = useTeleport ? useTeleport.checked : true;
     return config;
 }
 
 function setStatus(text, type) {
-    const s = document.getElementById('status');
-    s.textContent = text;
-    s.className = type || '';
+    statusEl.textContent = text;
+    statusEl.className = type || '';
+}
+
+function updateProgress(percent) {
+    const count = Math.round(percent / 5);
+    const blocks = progressBar.children;
+    for (let i = 0; i < blocks.length; i++) {
+        blocks[i].classList.toggle('active', i < count);
+    }
+    progressPercent.textContent = percent + '%';
+}
+
+function startProgress() {
+    if (progressInterval) { clearInterval(progressInterval); }
+    loader.style.display = 'block';
+    statusEl.style.display = 'none';
+    progressBar.innerHTML = '';
+    for (let i = 0; i < 20; i++) {
+        const b = document.createElement('div');
+        b.className = 'progress-block';
+        progressBar.appendChild(b);
+    }
+    let percent = 0;
+    updateProgress(0);
+    progressInterval = setInterval(() => {
+        percent += 1;
+        if (percent > 95) { percent = 95; }
+        updateProgress(percent);
+    }, 100);
+}
+
+function stopProgress() {
+    if (progressInterval) { clearInterval(progressInterval); progressInterval = null; }
+    updateProgress(100);
+    setTimeout(() => {
+        loader.style.display = 'none';
+        statusEl.style.display = 'block';
+    }, 250);
 }
 
 document.getElementById('config-form').addEventListener('submit', (event) => {
     event.preventDefault();
+    startProgress();
     vscode.postMessage({ command: 'save', config: readConfig() });
 });
 
 document.getElementById('teleport-login').addEventListener('click', () => {
-    setStatus('Teleport login in progress... open your browser when prompted');
+    startProgress();
     vscode.postMessage({ command: 'login' });
 });
 
 document.getElementById('test-teleport').addEventListener('click', () => {
-    setStatus('Testing Teleport...');
+    startProgress();
     vscode.postMessage({ command: 'test' });
 });
 
 document.getElementById('dry-run').addEventListener('click', () => {
-    setStatus('Dry run in progress...');
+    startProgress();
     vscode.postMessage({ command: 'dryRun' });
 });
 
 document.getElementById('sync-now').addEventListener('click', () => {
-    setStatus('Sync in progress...');
+    startProgress();
     vscode.postMessage({ command: 'sync' });
 });
 
@@ -82,11 +123,13 @@ window.addEventListener('message', (event) => {
             loadConfig(message.config);
             break;
         case 'saved':
+            stopProgress();
             setStatus('Configuration saved', 'ok');
             break;
         case 'loginResult':
         case 'testResult':
         case 'syncResult':
+            stopProgress();
             setStatus(message.detail, message.status);
             break;
     }
