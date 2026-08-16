@@ -18,6 +18,10 @@ interface FakeElement {
     click: () => void;
 }
 
+/**
+ * Creates a fake DOM element for testing the webview config panel.
+ * @returns {FakeElement} A fake element with listener and child helpers.
+ */
 function createElement(): FakeElement {
     const listeners: Record<string, ((...args: any[]) => void)[]> = {},
         children: FakeElement[] = [],
@@ -77,6 +81,8 @@ describe('webview config panel', () => {
                 if (!elements[id]) { elements[id] = createElement(); }
                 return elements[id];
             },
+            querySelector: () => createElement(),
+            querySelectorAll: () => [],
             createElement: () => createElement()
         };
 

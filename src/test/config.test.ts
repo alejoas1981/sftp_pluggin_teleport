@@ -1,7 +1,7 @@
 import { expect } from 'chai';
 import * as vscode from 'vscode';
-import { buildRsyncCommand, buildFtpCommand, buildSyncCommand, validateConfig } from '../sync';
-import { saveConfiguration, SftpConfig } from '../config';
+import { buildRsyncCommand, buildFtpCommand, buildSftpLftpCommand, buildSyncCommand, validateConfig } from '../sync';
+import { saveConfiguration, deleteConfiguration, SftpConfig } from '../config';
 
 const base: SftpConfig = {
     mode: 'teleport',
@@ -81,10 +81,24 @@ describe('buildFtpCommand', () => {
     });
 });
 
+describe('buildSftpLftpCommand', () => {
+    it('produces an sftp lftp mirror command', () => {
+        const cmd = buildSftpLftpCommand(sftpBase);
+        expect(cmd.command).to.equal('lftp');
+        expect(cmd.args[0]).to.equal('-c');
+        expect(cmd.args[1]).to.include('sftp://');
+        expect(cmd.args[1]).to.include(sftpBase.sftpHost as string);
+    });
+});
+
 describe('buildSyncCommand', () => {
-    it('dispatches to rsync for sftp', () => {
-        const cmd = buildSyncCommand(sftpBase);
+    it('dispatches to rsync for sftp when useRsync is enabled', () => {
+        const cmd = buildSyncCommand({ ...sftpBase, useRsync: true });
         expect(cmd.command).to.equal('rsync');
+    });
+    it('dispatches to lftp for sftp when useRsync is disabled', () => {
+        const cmd = buildSyncCommand(sftpBase);
+        expect(cmd.command).to.equal('lftp');
     });
     it('dispatches to lftp for ftp', () => {
         const cmd = buildSyncCommand(ftpBase);
@@ -106,7 +120,7 @@ describe('validateConfig', () => {
 });
 
 describe('saveConfiguration', () => {
-    it('writes all GUI fields to global settings.json', async () => {
+    it('writes all GUI fields to workspace settings.json', async () => {
         const context: any = { secrets: { store: async () => undefined } };
         const config: SftpConfig = {
             mode: 'sftp',
@@ -123,7 +137,7 @@ describe('saveConfiguration', () => {
         (vscode as any)._reset();
         await saveConfiguration(context, config);
         const updates = (vscode as any)._updates as { key: string; value: any; global: boolean }[];
-        expect(updates.every(u => u.global === true)).to.be.true;
+        expect(updates.every(u => u.global === false)).to.be.true;
         const byKey = new Map(updates.map(u => [u.key, u.value]));
         expect(byKey.get('mode')).to.equal('sftp');
         expect(byKey.get('sftpHost')).to.equal('sftp.example.com');
@@ -135,5 +149,19 @@ describe('saveConfiguration', () => {
         expect(byKey.get('rsyncFlags')).to.equal('--exclude .git');
         expect(byKey.get('debounceMs')).to.equal(300);
         expect(byKey.get('useTeleport')).to.equal(false);
+    });
+});
+
+describe('deleteConfiguration', () => {
+    it('removes only the selected mode settings', async () => {
+        const context: any = { secrets: { delete: async () => undefined } };
+        (vscode as any)._reset();
+        await deleteConfiguration(context, 'sftp');
+        const updates = (vscode as any)._updates as { key: string; value: any; global: boolean }[];
+        expect(updates.every(u => u.global === false && u.value === undefined)).to.be.true;
+        const keys = new Set(updates.map(u => u.key));
+        expect(keys.has('sftpHost')).to.be.true;
+        expect(keys.has('useRsync')).to.be.true;
+        expect(keys.has('ftpHost')).to.be.false;
     });
 });

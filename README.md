@@ -14,6 +14,19 @@ Most teams end up with a mix of remote environments: legacy boxes that only spea
 - **Dry run.** Preview what would happen without changing the remote side.
 - **Secure credentials.** Passwords are stored in VS Code `SecretStorage`; only configuration values live in `settings.json`.
 - **Status bar.** Always see the current state: `logging in`, `syncing`, `watching`, `ready`, or `error`.
+- **One active configuration.** The extension keeps a single configuration at a time. To switch to a different server or mode, click **Delete Config** in the webview and save a new one. Your password stays in VS Code `SecretStorage` until you overwrite it.
+- **No custom shell glue.** Unlike a hand-rolled VS Code Task or a `bash`/`python` watcher, this plugin uses `rsync`/`lftp` directly with secure secret handling, live status feedback, and first-class Teleport support out of the box.
+
+## Why not a VS Code Task or shell script
+
+A common Debian / VS Code workaround is a Task that runs an external script to watch files and `rsync` them. That works, but it leaves several problems unsolved:
+
+- **Security.** A Task or script almost always stores credentials in plain text inside a repo file, `.env`, or a shell alias. This extension stores passwords in VS Code `SecretStorage` and keeps `settings.json` free of secrets.
+- **Maintenance.** Tasks are usually per-workspace and require you to write, debug, and copy a shell script across machines and OSes.
+- **No live status.** A background script has no UI. You do not see whether it is currently logging in, syncing, or failing without digging through a terminal panel.
+- **No dry-run / on-demand sync.** The extension gives you a one-click dry run, manual sync, and automatic upload on save or file watcher.
+- **No Teleport integration.** Teleport's `tsh login` flow, session cache, and browser link handling would have to be implemented manually.
+- **Cross-platform.** `rsync` paths, `lftp` quoting, and `ssh` flag differences vary between macOS, Linux, and WSL. The plugin already normalizes these for FTP, SFTP, and Teleport modes.
 
 ## What you need
 
@@ -128,6 +141,7 @@ All settings live under `sftpPluggin`. You can set them through `Settings` (`Cmd
 4. Use **Login to Teleport** / **Test Teleport** when in `teleport` mode, or jump straight to **Dry Run** / **Sync Now**.
 5. Press `Ctrl+S` in any file inside `localPath` to trigger an automatic upload.
 6. To auto-upload on every change, run `SFTP: Start Watching`.
+7. To switch to a different server or mode, click **Delete Config** in the webview, then save a new configuration. The stored password is preserved unless you overwrite it.
 
 ## Commands
 

@@ -3,6 +3,14 @@ import { SftpConfig } from './config';
 
 let activeWatcher: vscode.FileSystemWatcher | undefined, debounceTimer: NodeJS.Timeout | undefined;
 
+/**
+ * Starts watching the configured local path for file changes and triggers syncs.
+ * @param context - The VS Code extension context.
+ * @param config - The SFTP configuration.
+ * @param syncFn - The async function to call when a change is detected.
+ * @param output - The output channel for logging.
+ * @returns {void}
+ */
 export function startWatching(
     context: vscode.ExtensionContext,
     config: SftpConfig,
@@ -19,6 +27,11 @@ export function startWatching(
 
     activeWatcher = vscode.workspace.createFileSystemWatcher(pattern, false, false, false);
 
+    /**
+     * Handles a file system event by debouncing and triggering a sync.
+     * @param uri - The URI of the changed file.
+     * @returns {void}
+     */
     const onEvent = (uri: vscode.Uri) => {
         output.appendLine(`[watch] ${uri.fsPath}`);
         if (debounceTimer) {
@@ -39,6 +52,10 @@ export function startWatching(
     output.appendLine('[watch] started');
 }
 
+/**
+ * Stops the active file system watcher and clears pending debounces.
+ * @returns {void}
+ */
 export function stopWatching(): void {
     if (debounceTimer) {
         clearTimeout(debounceTimer);

@@ -50,20 +50,111 @@
         "command": "sftpPluggin.testTeleport",
         "title": "SFTP: Test Teleport Connection"
       }
-    ]
-  },
-  "configuration": {
-    "title": "SFTP Plugin",
-    "properties": {
-      "sftpPluggin.uploadOnSave": {
-        "type": "boolean",
-        "default": true,
-        "description": "Upload current file after manual save (Ctrl+S)"
-      },
-      "sftpPluggin.uploadOnAutoSave": {
-        "type": "boolean",
-        "default": false,
-        "description": "Upload current file after auto-save"
+    ],
+    "configuration": {
+      "title": "SFTP Plugin",
+      "properties": {
+        "sftpPluggin.mode": {
+          "type": "string",
+          "enum": ["ftp", "sftp", "teleport"],
+          "default": "ftp",
+          "description": "Connection mode"
+        },
+        "sftpPluggin.ftpHost": {
+          "type": "string",
+          "default": "",
+          "description": "FTP host"
+        },
+        "sftpPluggin.ftpUser": {
+          "type": "string",
+          "default": "",
+          "description": "FTP user"
+        },
+        "sftpPluggin.ftpPort": {
+          "type": "number",
+          "default": 21,
+          "description": "FTP port (default 21)"
+        },
+        "sftpPluggin.sftpHost": {
+          "type": "string",
+          "default": "",
+          "description": "SFTP host"
+        },
+        "sftpPluggin.sftpUser": {
+          "type": "string",
+          "default": "",
+          "description": "SFTP user"
+        },
+        "sftpPluggin.sftpPort": {
+          "type": "number",
+          "default": 22,
+          "description": "SFTP/SSH port (default 22)"
+        },
+        "sftpPluggin.teleportHost": {
+          "type": "string",
+          "default": "",
+          "description": "Teleport proxy host"
+        },
+        "sftpPluggin.teleportUser": {
+          "type": "string",
+          "default": "",
+          "description": "Teleport user"
+        },
+        "sftpPluggin.teleportCluster": {
+          "type": "string",
+          "default": "",
+          "description": "Teleport cluster"
+        },
+        "sftpPluggin.remotePath": {
+          "type": "string",
+          "default": "",
+          "description": "Remote path"
+        },
+        "sftpPluggin.localPath": {
+          "type": "string",
+          "default": "",
+          "description": "Local project path"
+        },
+        "sftpPluggin.identity": {
+          "type": "string",
+          "default": "",
+          "description": "SSH private key path"
+        },
+        "sftpPluggin.sshFlags": {
+          "type": "string",
+          "default": "",
+          "description": "Extra SSH flags"
+        },
+        "sftpPluggin.rsyncFlags": {
+          "type": "string",
+          "default": "",
+          "description": "Extra rsync flags"
+        },
+        "sftpPluggin.debounceMs": {
+          "type": "number",
+          "default": 300,
+          "description": "File watcher debounce in milliseconds"
+        },
+        "sftpPluggin.useRsync": {
+          "type": "boolean",
+          "default": false,
+          "description": "Use rsync for SFTP sync (otherwise lftp)"
+        },
+        "sftpPluggin.useTeleport": {
+          "type": "boolean",
+          "default": false,
+          "description": "Use Teleport for connection"
+        },
+        "sftpPluggin.uploadOnSave": {
+          "type": "boolean",
+          "default": true,
+          "description": "Upload current file after manual save (Ctrl+S)"
+        },
+        "sftpPluggin.uploadOnAutoSave": {
+          "type": "boolean",
+          "default": false,
+          "description": "Upload current file after auto-save"
+        }
       }
     }
   },
@@ -71,7 +162,8 @@
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
-    "test": "mocha --require ts-node/register --require src/test/setup.js 'src/test/**/*.test.ts'"
+    "test": "mocha --require ts-node/register --require src/test/setup.js 'src/test/**/*.test.ts'",
+    "build:extension": "mkdir -p build && vsce package -o build/"
   },
   "devDependencies": {
     "@types/chai": "4.3.11",
