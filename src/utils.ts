@@ -1,23 +1,52 @@
-import * as vscode from 'vscode';
-import * as path from 'path';
 import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import ignore from 'ignore';
 
-/**
- * Resolves an absolute file URI relative to the extension path.
- * @param context - The VS Code extension context.
- * @param relativePath - The path relative to the extension root.
- * @returns {vscode.Uri} The resolved file URI.
- */
-export function getExtensionUri(context: vscode.ExtensionContext, relativePath: string): vscode.Uri {
-    return vscode.Uri.file(path.join(context.extensionPath, relativePath));
+export function normalizeRemotePath(p: string): string {
+    const normalized = path.posix.normalize(p || '.');
+    if (normalized === '/' || normalized === '.') {
+        return normalized;
+    }
+    return normalized.replace(/\/+$/, '');
 }
 
-/**
- * Reads a file from the extension path as a UTF-8 string.
- * @param context - The VS Code extension context.
- * @param relativePath - The path relative to the extension root.
- * @returns {string} The file contents.
- */
-export function readFileSync(context: vscode.ExtensionContext, relativePath: string): string {
-    return fs.readFileSync(path.join(context.extensionPath, relativePath), 'utf8');
+export function joinRemote(...segments: string[]): string {
+    return normalizeRemotePath(path.posix.join(...segments));
+}
+
+export function joinLocal(...segments: string[]): string {
+    return path.normalize(path.join(...segments));
+}
+
+export function isIgnored(rel: string, patterns: string[]): boolean {
+    return ignore().add(patterns).ignores(rel);
+}
+
+export function ensureLocalDir(localPath: string): void {
+    fs.mkdirSync(path.dirname(localPath), { recursive: true });
+}
+
+export function resolveKeyValue(value?: string): string | undefined {
+    if (!value) {
+        return undefined;
+    }
+    if (value.startsWith('~')) {
+        return path.join(os.homedir(), value.slice(1).replace(/^\//, ''));
+    }
+    return value;
+}
+
+export function resolvePrivateKey(value?: string): Buffer | string | undefined {
+    const resolved = resolveKeyValue(value);
+    if (!resolved) {
+        return undefined;
+    }
+    if (resolved.includes('-----BEGIN')) {
+        return resolved;
+    }
+    if (fs.existsSync(resolved)) {
+        return fs.readFileSync(resolved);
+    }
+    return resolved;
 }

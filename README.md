@@ -4,37 +4,26 @@ A single VS Code extension that keeps your local project folder in sync with a r
 
 ## Why this plugin
 
-Most teams end up with a mix of remote environments: legacy boxes that only speak FTP, modern cloud hosts reachable over plain SSH/SFTP, and corporate infrastructure locked behind Teleport. This extension replaces multiple tools and manual `rsync`/`lftp` commands with one consistent workflow inside VS Code.
+Most teams end up with a mix of remote environments: legacy boxes that only speak FTP, modern cloud hosts reachable over plain SSH/SFTP, and corporate infrastructure locked behind Teleport. This extension replaces external `rsync`/`lftp`/`ssh` tools with Node.js libraries (`ssh2`, `basic-ftp`) and one consistent workflow inside VS Code.
 
 - **One UI, three transports.** Switch between FTP, SFTP, and Teleport from a dropdown. The last selected mode is remembered.
 - **Visual config panel.** No need to hand-edit `settings.json`; the `SFTP: Open Configuration` webview writes all fields to your global IDE settings when you click **Save**.
-- **Incremental sync.** Uses `rsync` for SFTP/Teleport and `lftp mirror` for FTP, transferring only changed files.
-- **Upload on save.** Optionally upload the whole `localPath` after every manual `Ctrl+S` or auto-save.
+- **Cross-platform.** Works on Windows, macOS, and Linux without installing `rsync`, `lftp`, or `ssh`.
+- **Incremental sync.** Compares local and remote file lists and transfers only changed files using parallel `p-queue`.
+- **Upload on save.** Optionally upload the current file after every manual `Ctrl+S` or auto-save.
+- **File-level commands.** Upload, download, sync, or delete the remote copy of the active file from the Command Palette or editor title.
 - **Continuous watching.** Run `SFTP: Start Watching` to sync automatically when files change, with a configurable debounce.
 - **Dry run.** Preview what would happen without changing the remote side.
 - **Secure credentials.** Passwords are stored in VS Code `SecretStorage`; only configuration values live in `settings.json`.
 - **Status bar.** Always see the current state: `logging in`, `syncing`, `watching`, `ready`, or `error`.
 - **One active configuration.** The extension keeps a single configuration at a time. To switch to a different server or mode, click **Delete Config** in the webview and save a new one. Your password stays in VS Code `SecretStorage` until you overwrite it.
-- **No custom shell glue.** Unlike a hand-rolled VS Code Task or a `bash`/`python` watcher, this plugin uses `rsync`/`lftp` directly with secure secret handling, live status feedback, and first-class Teleport support out of the box.
-
-## Why not a VS Code Task or shell script
-
-A common Debian / VS Code workaround is a Task that runs an external script to watch files and `rsync` them. That works, but it leaves several problems unsolved:
-
-- **Security.** A Task or script almost always stores credentials in plain text inside a repo file, `.env`, or a shell alias. This extension stores passwords in VS Code `SecretStorage` and keeps `settings.json` free of secrets.
-- **Maintenance.** Tasks are usually per-workspace and require you to write, debug, and copy a shell script across machines and OSes.
-- **No live status.** A background script has no UI. You do not see whether it is currently logging in, syncing, or failing without digging through a terminal panel.
-- **No dry-run / on-demand sync.** The extension gives you a one-click dry run, manual sync, and automatic upload on save or file watcher.
-- **No Teleport integration.** Teleport's `tsh login` flow, session cache, and browser link handling would have to be implemented manually.
-- **Cross-platform.** `rsync` paths, `lftp` quoting, and `ssh` flag differences vary between macOS, Linux, and WSL. The plugin already normalizes these for FTP, SFTP, and Teleport modes.
 
 ## What you need
 
 - Visual Studio Code 1.80+ or Devin Desktop
-- One of the following transport clients in your `$PATH`:
-  - **Teleport mode:** `tsh` and `rsync`
-  - **SFTP mode:** `rsync` and `ssh`
-  - **FTP mode:** `lftp`
+- **Teleport mode only:** the `tsh` CLI in your `$PATH`
+
+No other external tools are required. FTP and SFTP transfers run through pure Node.js libraries.
 
 ## How it works
 
@@ -42,13 +31,11 @@ A common Debian / VS Code workaround is a Task that runs an external script to w
 2. **Mode selection.** `sftpPluggin.mode` is `ftp`, `sftp`, or `teleport`. The webview sets and persists this value.
 3. **Connection ready-up.**
    - **Teleport:** the extension runs `tsh status`; if the session is missing or expired it runs `tsh login --proxy=<teleportHost> --user=<teleportUser> [--cluster=<teleportCluster>]`, captures the browser link, and opens it with `vscode.env.openExternal`.
-   - **SFTP:** `rsync` is invoked through an `ssh` tunnel (optionally using an identity file and extra SSH flags).
-   - **FTP:** `lftp` is invoked with `mirror -R` to push the local tree to the remote path.
-4. **Transfer.** Depending on the mode the extension runs the equivalent of:
-   - `rsync -avz --delete <localPath>/ <sftpUser>@<sftpHost>:<remotePath>/` (SFTP / Teleport)
-   - `lftp -c "open -u <ftpUser>,<password> <ftpHost>; mirror -R ... <localPath> <remotePath>"` (FTP)
-5. **Upload on save.** `onDidSaveTextDocument` triggers a sync for files inside `localPath` when `uploadOnSave` or `uploadOnAutoSave` is enabled.
-6. **File watcher.** `SFTP: Start Watching` watches `localPath/**` and syncs after `debounceMs`.
+   - **SFTP:** `ssh2` connects to `<sftpHost>:<sftpPort>` using password, private key, passphrase, or SSH agent.
+   - **FTP:** `basic-ftp` connects to `<ftpHost>:<ftpPort>` with optional explicit TLS.
+4. **Transfer.** The sync engine walks `localPath`, lists the remote tree, and uploads missing or changed files. Remote files not present locally are deleted. Empty local directories are created remotely.
+5. **Upload on save.** `onDidSaveTextDocument` triggers an upload of the saved file when `uploadOnSave` or `uploadOnAutoSave` is enabled.
+6. **File watcher.** `SFTP: Start Watching` watches `localPath/**` and runs the sync engine after `debounceMs`.
 7. **Status bar.** The status bar shows the current operation and result.
 
 ## Install the extension
@@ -71,17 +58,24 @@ All settings live under `sftpPluggin`. You can set them through `Settings` (`Cmd
 | `sftpPluggin.teleportCluster` | `string` | `undefined` | Teleport cluster name, e.g. `main` |
 | `sftpPluggin.sftpHost` | `string` | `undefined` | Target SSH/SFTP host (also used as the Teleport target) |
 | `sftpPluggin.sftpUser` | `string` | `undefined` | Username on the target host |
+| `sftpPluggin.sftpPort` | `number` | `22` | SSH/SFTP port |
 | `sftpPluggin.ftpHost` | `string` | `undefined` | FTP server host, e.g. `ftp.example.com` |
 | `sftpPluggin.ftpUser` | `string` | `undefined` | FTP username |
+| `sftpPluggin.ftpPort` | `number` | `21` | FTP port |
+| `sftpPluggin.ftpPassive` | `boolean` | `true` | Use passive mode for FTP |
+| `sftpPluggin.ftpSecure` | `boolean` | `false` | Use FTPS (TLS) — encrypted FTP connection; enable if the server requires `AUTH TLS` |
 | `sftpPluggin.remotePath` | `string` | `undefined` | Destination directory on the remote host, e.g. `/home/user/project` |
 | `sftpPluggin.localPath` | `string` | `undefined` | Local directory to sync from; can be absolute or relative to the first workspace folder |
-| `sftpPluggin.identity` | `string` | `undefined` | SSH private key path, used only in `sftp` mode |
-| `sftpPluggin.password` | `string` | `undefined` | Stored in VS Code `SecretStorage`; used for FTP login and hidden from `settings.json` |
+| `sftpPluggin.identity` | `string` | `undefined` | **Deprecated.** Use `privateKey` instead. |
+| `sftpPluggin.privateKey` | `string` | `undefined` | SSH private key path or key content for `sftp`/`teleport` |
+| `sftpPluggin.passphrase` | `string` | `undefined` | Passphrase for an encrypted private key |
+| `sftpPluggin.agent` | `string` | `undefined` | SSH agent socket or `pageant` on Windows |
+| `sftpPluggin.password` | `string` | `undefined` | Stored in VS Code `SecretStorage`; used for FTP and password-based SFTP. Hidden from `settings.json` |
+| `sftpPluggin.ignore` | `string[]` | `[]` | Patterns to ignore during sync (e.g. `.git`, `node_modules`) |
+| `sftpPluggin.concurrency` | `number` | `4` | Parallel file transfers |
 | `sftpPluggin.debounceMs` | `number` | `300` | Milliseconds to wait after a watcher event before syncing |
-| `sftpPluggin.rsyncFlags` | `string` | `undefined` | Extra rsync flags for `sftp`/`teleport` modes, e.g. `--exclude .git --checksum` |
-| `sftpPluggin.sshFlags` | `string` | `undefined` | Extra SSH flags for `sftp` mode, e.g. `-p 2222` |
-| `sftpPluggin.uploadOnSave` | `boolean` | `true` | Upload the saved file's tree after a manual `Ctrl+S` |
-| `sftpPluggin.uploadOnAutoSave` | `boolean` | `false` | Upload the saved file's tree after VS Code auto-save |
+| `sftpPluggin.uploadOnSave` | `boolean` | `true` | Upload the current file after a manual `Ctrl+S` |
+| `sftpPluggin.uploadOnAutoSave` | `boolean` | `false` | Upload the current file after VS Code auto-save |
 
 ## Sample `settings.json`
 
@@ -95,10 +89,12 @@ All settings live under `sftpPluggin`. You can set them through `Settings` (`Cmd
   "sftpPluggin.teleportCluster": "main",
   "sftpPluggin.sftpHost": "sftp-node",
   "sftpPluggin.sftpUser": "your-sftp-user",
+  "sftpPluggin.privateKey": "~/.tsh/keys/...",
   "sftpPluggin.remotePath": "/home/your-sftp-user/project",
   "sftpPluggin.localPath": "${workspaceFolder}/project",
+  "sftpPluggin.ignore": [".git", "node_modules"],
+  "sftpPluggin.concurrency": 4,
   "sftpPluggin.debounceMs": 300,
-  "sftpPluggin.rsyncFlags": "--exclude .git --exclude node_modules",
   "sftpPluggin.uploadOnSave": true,
   "sftpPluggin.uploadOnAutoSave": false
 }
@@ -111,11 +107,11 @@ All settings live under `sftpPluggin`. You can set them through `Settings` (`Cmd
   "sftpPluggin.mode": "sftp",
   "sftpPluggin.sftpHost": "sftp.example.com",
   "sftpPluggin.sftpUser": "deploy",
-  "sftpPluggin.identity": "~/.ssh/id_rsa",
-  "sftpPluggin.sshFlags": "-p 2222",
+  "sftpPluggin.privateKey": "~/.ssh/id_rsa",
   "sftpPluggin.remotePath": "/var/www/project",
   "sftpPluggin.localPath": "${workspaceFolder}",
-  "sftpPluggin.rsyncFlags": "--exclude .git --exclude node_modules",
+  "sftpPluggin.ignore": [".git", "node_modules"],
+  "sftpPluggin.concurrency": 4,
   "sftpPluggin.uploadOnSave": true
 }
 ```
@@ -127,8 +123,11 @@ All settings live under `sftpPluggin`. You can set them through `Settings` (`Cmd
   "sftpPluggin.mode": "ftp",
   "sftpPluggin.ftpHost": "ftp.example.com",
   "sftpPluggin.ftpUser": "deploy",
+  "sftpPluggin.ftpSecure": false,
   "sftpPluggin.remotePath": "/public_html/project",
   "sftpPluggin.localPath": "${workspaceFolder}",
+  "sftpPluggin.ignore": [".git"],
+  "sftpPluggin.concurrency": 4,
   "sftpPluggin.uploadOnSave": true
 }
 ```
@@ -138,20 +137,25 @@ All settings live under `sftpPluggin`. You can set them through `Settings` (`Cmd
 1. Open `SFTP: Open Configuration` from the Command Palette.
 2. Select the transport mode from the **Connection Mode** dropdown and fill the visible fields.
 3. Click **Save**. All values are written to your global `settings.json` automatically.
-4. Use **Login to Teleport** / **Test Teleport** when in `teleport` mode, or jump straight to **Dry Run** / **Sync Now**.
-5. Press `Ctrl+S` in any file inside `localPath` to trigger an automatic upload.
-6. To auto-upload on every change, run `SFTP: Start Watching`.
-7. To switch to a different server or mode, click **Delete Config** in the webview, then save a new configuration. The stored password is preserved unless you overwrite it.
+4. Use **Login to Teleport** / **Test Connection** when in `teleport` mode, or jump straight to **Dry Run** / **Sync Now**.
+5. Press `Ctrl+S` in any file inside `localPath` to trigger an automatic upload of that file.
+6. Use the editor-title buttons or Command Palette to **Upload**, **Download**, **Sync**, or **Delete Remote** for the active file.
+7. To auto-upload on every change, run `SFTP: Start Watching`.
+8. To switch to a different server or mode, click **Delete Config** in the webview, then save a new configuration. The stored password is preserved unless you overwrite it.
 
 ## Commands
 
 - `SFTP: Open Configuration`
 - `SFTP: Teleport Login`
-- `SFTP: Test Teleport Connection`
+- `SFTP: Test Connection`
 - `SFTP: Sync Now`
 - `SFTP: Dry Run`
 - `SFTP: Start Watching`
 - `SFTP: Stop Watching`
+- `SFTP: Upload Active File`
+- `SFTP: Download Active File`
+- `SFTP: Sync Active File`
+- `SFTP: Delete Remote File`
 
 ## Testing
 
@@ -159,7 +163,7 @@ All settings live under `sftpPluggin`. You can set them through `Settings` (`Cmd
 npm test
 ```
 
-The test suite covers command building for all three modes, configuration validation, the webview UI interaction, the progress renderer, and the `saveConfiguration` flow that writes every GUI field to the global settings.
+The test suite covers configuration validation, the webview UI interaction, the progress renderer, and the `saveConfiguration` flow that writes GUI fields to the global settings.
 
 ## Notes on the Teleport session
 

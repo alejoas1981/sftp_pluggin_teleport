@@ -70,6 +70,14 @@
             background: #c75450;
             color: #fff;
         }
+        .btn-icon {
+            width: 16px;
+            height: 16px;
+            display: inline-block;
+            vertical-align: middle;
+            margin-right: 4px;
+            shape-rendering: crispEdges;
+        }
         #status {
             margin-top: 16px;
             white-space: pre-wrap;
@@ -132,21 +140,59 @@
         <div class="field" data-mode="ftp"><label for="ftpHost">FTP Host</label><input type="text" id="ftpHost"></div>
         <div class="field" data-mode="ftp"><label for="ftpUser">FTP User</label><input type="text" id="ftpUser"></div>
         <div class="field" data-mode="ftp"><label for="ftpPort">FTP Port</label><input type="number" id="ftpPort" placeholder="21"></div>
+        <div class="checkbox-row" data-mode="ftp"><input type="checkbox" id="ftpPassive"><label for="ftpPassive">Use passive mode</label></div>
+        <div class="checkbox-row" data-mode="ftp"><input type="checkbox" id="ftpSecure"><label for="ftpSecure">Use FTPS (TLS) — encrypted FTP connection (turn on if the server requires AUTH TLS)</label></div>
         <div class="field"><label for="remotePath">Remote Path</label><input type="text" id="remotePath" placeholder="/home/user/project"></div>
         <div class="field"><label for="localPath">Local Path</label><input type="text" id="localPath" placeholder="/Users/you/project" readonly></div>
         <div class="field" data-mode="sftp"><label for="identity">Identity File</label><input type="text" id="identity" placeholder="~/.ssh/id_rsa"></div>
+        <div class="field" data-mode="sftp,teleport"><label for="privateKey">Private Key</label><input type="text" id="privateKey" placeholder="~/.ssh/id_rsa"></div>
+        <div class="field" data-mode="sftp,teleport"><label for="passphrase">Passphrase</label><input type="password" id="passphrase"></div>
+        <div class="field" data-mode="sftp,teleport"><label for="agent">SSH Agent</label><input type="text" id="agent" placeholder="/run/user/1000/ssh-agent or pageant"></div>
         <div class="field"><label for="password">Password (stored securely)</label><input type="password" id="password" placeholder="leave empty to keep existing"></div>
         <div class="checkbox-row"><input type="checkbox" id="save-password"><label for="save-password">Save password</label></div>
+        <div class="field"><label for="concurrency">Concurrency</label><input type="number" id="concurrency" placeholder="4"></div>
+        <div class="field"><label for="ignore">Ignore patterns (one per line)</label><textarea id="ignore" rows="4" placeholder=".git\nnode_modules"></textarea></div>
         <div class="field"><label for="debounceMs">Debounce (ms)</label><input type="number" id="debounceMs" value="300"></div>
         <div class="field" data-mode="sftp"><label for="sshFlags">Extra SSH Flags</label><input type="text" id="sshFlags" placeholder="-o StrictHostKeyChecking=no"></div>
         <div class="field" data-mode="sftp,teleport"><label for="rsyncFlags">Extra Rsync Flags</label><input type="text" id="rsyncFlags" placeholder="--exclude .git"></div>
         <div class="actions">
-            <button type="submit" id="btn-save">💾 Save</button>
-            <button type="button" id="teleport-login" data-mode="teleport">🔐 Login to Teleport</button>
-            <button type="button" id="test-connection">🔌 Test Connection</button>
-            <button type="button" id="dry-run">👁 Dry Run</button>
-            <button type="button" id="sync-now">🔄 Sync Now</button>
-            <button type="button" id="delete-config" class="btn-danger">🗑 Delete Config</button>
+            <button type="submit" id="btn-save">
+                <svg class="btn-icon" viewBox="0 0 16 16" aria-hidden="true">
+                    <path fill-rule="evenodd" d="M2 1h12v14H2V1zm2 2h8v4H4V3zm1 6h6v4H5v-4z" fill="currentColor"/>
+                </svg>
+                Save
+            </button>
+            <button type="button" id="teleport-login" data-mode="teleport">
+                <svg class="btn-icon" viewBox="0 0 16 16" aria-hidden="true">
+                    <path fill-rule="evenodd" d="M5 3h6v3H5V3zm-1 4h8v8H4V7zm3 4v-2h2v2H7z" fill="currentColor"/>
+                </svg>
+                Login to Teleport
+            </button>
+            <button type="button" id="test-connection">
+                <svg class="btn-icon" viewBox="0 0 16 16" aria-hidden="true">
+                    <path d="M5 1h1v3H5V1zm4 0h1v3H9V1zM4 5h8v2H4V5zm1 2h6v7H5V7z" fill="currentColor"/>
+                </svg>
+                Test Connection
+            </button>
+            <button type="button" id="dry-run">
+                <svg class="btn-icon" viewBox="0 0 16 16" aria-hidden="true">
+                    <circle cx="6" cy="6" r="3" fill="none" stroke="currentColor" stroke-width="2"/>
+                    <line x1="9" y1="9" x2="13" y2="13" stroke="currentColor" stroke-width="2"/>
+                </svg>
+                Dry Run
+            </button>
+            <button type="button" id="sync-now">
+                <svg class="btn-icon" viewBox="0 0 16 16" aria-hidden="true">
+                    <path d="M3 5l3-3v2h5v2H6v2H3V5zm7 6l3 3v-2h3v-2h-5V8l-1 3z" fill="currentColor"/>
+                </svg>
+                Sync Now
+            </button>
+            <button type="button" id="delete-config" class="btn-danger">
+                <svg class="btn-icon" viewBox="0 0 16 16" aria-hidden="true">
+                    <path fill-rule="evenodd" d="M5 3h6v1H5V3zm-2 2h10v1H3V5zm2 2h1v7H5V7zm3 0h1v7H8V7zm3 0h1v7h-1V7z" fill="currentColor"/>
+                </svg>
+                Delete Config
+            </button>
         </div>
     </form>
     <div id="status"></div>

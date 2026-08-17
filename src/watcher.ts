@@ -1,16 +1,13 @@
 import * as vscode from 'vscode';
+import * as path from 'path';
+import PQueue from 'p-queue';
 import { SftpConfig } from './config';
+import { isIgnored } from './utils';
 
-let activeWatcher: vscode.FileSystemWatcher | undefined, debounceTimer: NodeJS.Timeout | undefined;
+let activeWatcher: vscode.FileSystemWatcher | undefined;
+let activeSyncQueue: PQueue | undefined;
+let debounceTimer: NodeJS.Timeout | undefined;
 
-/**
- * Starts watching the configured local path for file changes and triggers syncs.
- * @param context - The VS Code extension context.
- * @param config - The SFTP configuration.
- * @param syncFn - The async function to call when a change is detected.
- * @param output - The output channel for logging.
- * @returns {void}
- */
 export function startWatching(
     context: vscode.ExtensionContext,
     config: SftpConfig,
@@ -23,24 +20,25 @@ export function startWatching(
         throw new Error('localPath is required to start watching');
     }
 
-    const base = vscode.Uri.file(config.localPath), pattern = new vscode.RelativePattern(base, '**');
+    const base = vscode.Uri.file(config.localPath),
+        pattern = new vscode.RelativePattern(base, '**');
 
     activeWatcher = vscode.workspace.createFileSystemWatcher(pattern, false, false, false);
+    activeSyncQueue = new PQueue({ concurrency: 1 });
 
-    /**
-     * Handles a file system event by debouncing and triggering a sync.
-     * @param uri - The URI of the changed file.
-     * @returns {void}
-     */
     const onEvent = (uri: vscode.Uri) => {
+        const rel = path.relative(config.localPath!, uri.fsPath).replace(/\\/g, '/');
+        if (isIgnored(rel, config.ignore ?? [])) {
+            return;
+        }
         output.appendLine(`[watch] ${uri.fsPath}`);
         if (debounceTimer) {
             clearTimeout(debounceTimer);
         }
         debounceTimer = setTimeout(() => {
-            syncFn()
+            activeSyncQueue!.add(() => syncFn()
                 .then(() => output.appendLine('[watch] sync ok'))
-                .catch((error) => output.appendLine(`[sync error] ${error.message}`));
+                .catch((error: any) => output.appendLine(`[sync error] ${error.message}`)));
         }, config.debounceMs || 300);
     };
 
@@ -52,14 +50,14 @@ export function startWatching(
     output.appendLine('[watch] started');
 }
 
-/**
- * Stops the active file system watcher and clears pending debounces.
- * @returns {void}
- */
 export function stopWatching(): void {
     if (debounceTimer) {
         clearTimeout(debounceTimer);
         debounceTimer = undefined;
+    }
+    if (activeSyncQueue) {
+        activeSyncQueue.clear();
+        activeSyncQueue = undefined;
     }
     if (activeWatcher) {
         activeWatcher.dispose();

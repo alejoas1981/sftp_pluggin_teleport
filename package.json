@@ -2,7 +2,7 @@
   "name": "sftp-pluggin",
   "displayName": "SFTP Plugin",
   "description": "VS Code plugin for SFTP with Teleport integration",
-  "version": "2.1.0",
+  "version": "3.0.0",
   "publisher": "alejoas1981",
   "author": {
     "name": "Savchenko Aleksey",
@@ -52,15 +52,71 @@
       },
       {
         "command": "sftpPluggin.testTeleport",
-        "title": "SFTP: Test Teleport Connection"
+        "title": "SFTP: Test Connection"
+      },
+      {
+        "command": "sftpPluggin.uploadActiveFile",
+        "title": "SFTP: Upload Active File"
+      },
+      {
+        "command": "sftpPluggin.downloadActiveFile",
+        "title": "SFTP: Download Active File"
+      },
+      {
+        "command": "sftpPluggin.syncFile",
+        "title": "SFTP: Sync Active File"
+      },
+      {
+        "command": "sftpPluggin.deleteRemote",
+        "title": "SFTP: Delete Remote File"
       }
     ],
+    "menus": {
+      "explorer/context": [
+        {
+          "command": "sftpPluggin.uploadActiveFile",
+          "when": "explorerResourceIsFile",
+          "group": "6_sftp@1"
+        },
+        {
+          "command": "sftpPluggin.downloadActiveFile",
+          "when": "explorerResourceIsFile",
+          "group": "6_sftp@2"
+        },
+        {
+          "command": "sftpPluggin.syncFile",
+          "when": "explorerResourceIsFile",
+          "group": "6_sftp@3"
+        },
+        {
+          "command": "sftpPluggin.deleteRemote",
+          "when": "explorerResourceIsFile",
+          "group": "6_sftp@4"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "sftpPluggin.uploadActiveFile",
+          "when": "resourceFilename",
+          "group": "navigation@1"
+        },
+        {
+          "command": "sftpPluggin.downloadActiveFile",
+          "when": "resourceFilename",
+          "group": "navigation@2"
+        }
+      ]
+    },
     "configuration": {
       "title": "SFTP Plugin",
       "properties": {
         "sftpPluggin.mode": {
           "type": "string",
-          "enum": ["ftp", "sftp", "teleport"],
+          "enum": [
+            "ftp",
+            "sftp",
+            "teleport"
+          ],
           "default": "ftp",
           "description": "Connection mode"
         },
@@ -119,6 +175,44 @@
           "default": "",
           "description": "Local project path"
         },
+        "sftpPluggin.privateKey": {
+          "type": "string",
+          "default": "",
+          "description": "SSH private key path or key content"
+        },
+        "sftpPluggin.passphrase": {
+          "type": "string",
+          "default": "",
+          "description": "Passphrase for the SSH private key"
+        },
+        "sftpPluggin.agent": {
+          "type": "string",
+          "default": "",
+          "description": "SSH agent socket or 'pageant'"
+        },
+        "sftpPluggin.ignore": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "description": "Patterns to ignore during sync"
+        },
+        "sftpPluggin.concurrency": {
+          "type": "number",
+          "default": 4,
+          "description": "Number of parallel file transfers"
+        },
+        "sftpPluggin.ftpPassive": {
+          "type": "boolean",
+          "default": true,
+          "description": "Use passive mode for FTP"
+        },
+        "sftpPluggin.ftpSecure": {
+          "type": "boolean",
+          "default": false,
+          "description": "Use FTPS (TLS) — encrypted FTP connection; enable if the server requires AUTH TLS"
+        },
         "sftpPluggin.identity": {
           "type": "string",
           "default": "",
@@ -167,17 +261,25 @@
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
     "test": "mocha --require ts-node/register --require src/test/setup.js 'src/test/**/*.test.ts'",
-    "build:extension": "mkdir -p build && vsce package -o build/"
+    "build:extension": "mkdir -p build && vsce package --dependencies -o build/"
   },
   "devDependencies": {
     "@types/chai": "4.3.11",
     "@types/mocha": "10.0.6",
     "@types/node": "20.11.5",
+    "@types/ssh2": "^1.15.5",
     "@types/vscode": "1.80.0",
     "@vscode/vsce": "2.24.0",
     "chai": "4.4.1",
     "mocha": "10.4.0",
     "ts-node": "10.9.2",
     "typescript": "5.5.4"
+  },
+  "dependencies": {
+    "basic-ftp": "^5.3.1",
+    "ignore": "^5.3.2",
+    "p-queue": "^6.6.2",
+    "ssh2": "^1.17.0",
+    "upath": "^2.0.1"
   }
 }

@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import { getConfiguration, saveConfiguration, deleteConfiguration, getPassword, SftpConfig } from './config';
-import { runSync, testConnection, ensureTeleportSession } from './sync';
+import { runSync, testConnection, ensureTeleportSession, uploadFile, downloadFile, deleteRemoteFile } from './sync';
 import { startWatching, stopWatching } from './watcher';
 import { createStatusBar, updateSftpStatus, startLoading, stopLoading } from './status';
 
@@ -29,6 +29,10 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.commands.registerCommand('sftpPluggin.testTeleport', () => runCommand(runConnectionTest)),
         vscode.commands.registerCommand('sftpPluggin.startWatching', () => runCommand((cfg) => startWatcher(context, cfg))),
         vscode.commands.registerCommand('sftpPluggin.stopWatching', stopWatcher),
+        vscode.commands.registerCommand('sftpPluggin.uploadActiveFile', () => runCommand(uploadActiveFile)),
+        vscode.commands.registerCommand('sftpPluggin.downloadActiveFile', () => runCommand(downloadActiveFile)),
+        vscode.commands.registerCommand('sftpPluggin.syncFile', () => runCommand(uploadActiveFile)),
+        vscode.commands.registerCommand('sftpPluggin.deleteRemote', () => runCommand(deleteActiveFile)),
         vscode.workspace.onWillSaveTextDocument(handleDocumentWillSave),
         vscode.workspace.onDidSaveTextDocument(handleDocumentSave)
     );
@@ -117,6 +121,52 @@ async function runSyncCommand(config: SftpConfig, dryRun: boolean): Promise<void
  * @param config - The SFTP configuration.
  * @returns {Promise<void>}
  */
+async function uploadActiveFile(config: SftpConfig): Promise<void> {
+    const editor = vscode.window.activeTextEditor;
+    if (!editor || editor.document.uri.scheme !== 'file') {
+        throw new Error('No active file');
+    }
+    const localPath = editor.document.fileName;
+    validateFileInLocalPath(config, localPath);
+    await uploadFile(config, localPath);
+    outputChannel.appendLine(`Uploaded ${localPath}`);
+}
+
+async function downloadActiveFile(config: SftpConfig): Promise<void> {
+    const editor = vscode.window.activeTextEditor;
+    if (!editor || editor.document.uri.scheme !== 'file') {
+        throw new Error('No active file');
+    }
+    const localPath = editor.document.fileName;
+    validateFileInLocalPath(config, localPath);
+    await downloadFile(config, localPath);
+    outputChannel.appendLine(`Downloaded ${localPath}`);
+}
+
+async function deleteActiveFile(config: SftpConfig): Promise<void> {
+    const editor = vscode.window.activeTextEditor;
+    if (!editor || editor.document.uri.scheme !== 'file') {
+        throw new Error('No active file');
+    }
+    const localPath = editor.document.fileName;
+    validateFileInLocalPath(config, localPath);
+    await deleteRemoteFile(config, localPath);
+    outputChannel.appendLine(`Deleted remote ${localPath}`);
+}
+
+function validateFileInLocalPath(config: SftpConfig, localPath: string): void {
+    if (!config.localPath) {
+        throw new Error('localPath is not configured');
+    }
+    let root = config.localPath;
+    if (!path.isAbsolute(root) && vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0) {
+        root = path.join(vscode.workspace.workspaceFolders[0].uri.fsPath, root);
+    }
+    if (!localPath.startsWith(root)) {
+        throw new Error('Active file is outside the configured local path');
+    }
+}
+
 async function runConnectionTest(config: SftpConfig): Promise<void> {
     startLoading();
     const result = await testConnection(config);
@@ -382,7 +432,10 @@ function handleDocumentSave(doc: vscode.TextDocument): void {
     }
     if (!doc.fileName.startsWith(localPath)) { return; }
     if (syncInProgress) { return; }
-    vscode.commands.executeCommand('sftpPluggin.syncNow');
+    runCommand(async (cfg) => {
+        await uploadFile(cfg, doc.fileName);
+        outputChannel.appendLine(`Uploaded ${doc.fileName}`);
+    });
 }
 
 /**

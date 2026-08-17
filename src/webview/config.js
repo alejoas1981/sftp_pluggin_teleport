@@ -15,6 +15,10 @@ const vscode = acquireVsCodeApi(),
         'remotePath',
         'localPath',
         'identity',
+        'privateKey',
+        'passphrase',
+        'agent',
+        'concurrency',
         'debounceMs',
         'sshFlags',
         'rsyncFlags'
@@ -43,10 +47,16 @@ function loadConfig(config) {
     }
     const passwordEl = document.getElementById('password'),
         useRsyncEl = document.getElementById('useRsync'),
-        savePasswordEl = document.getElementById('save-password');
+        savePasswordEl = document.getElementById('save-password'),
+        ignoreEl = document.getElementById('ignore'),
+        ftpPassiveEl = document.getElementById('ftpPassive'),
+        ftpSecureEl = document.getElementById('ftpSecure');
     if (passwordEl) { passwordEl.value = ''; }
     if (useRsyncEl) { useRsyncEl.checked = !!config.useRsync; }
     if (savePasswordEl) { savePasswordEl.checked = false; }
+    if (ignoreEl) { ignoreEl.value = (config.ignore || []).join('\n'); }
+    if (ftpPassiveEl) { ftpPassiveEl.checked = config.ftpPassive !== false; }
+    if (ftpSecureEl) { ftpSecureEl.checked = !!config.ftpSecure; }
     updateModeFields();
 }
 
@@ -61,6 +71,8 @@ function readConfig() {
         if (el) {
             if (field === 'debounceMs') {
                 config[field] = Number(el.value) || 300;
+            } else if (field === 'concurrency') {
+                config[field] = Number(el.value) || 4;
             } else if (field === 'sftpPort' || field === 'ftpPort') {
                 const defaultPort = field === 'sftpPort' ? 22 : 21;
                 config[field] = el.value.trim() === '' || Number.isNaN(Number(el.value)) ? defaultPort : Number(el.value);
@@ -71,7 +83,10 @@ function readConfig() {
     }
     const passwordEl = document.getElementById('password'),
         savePasswordEl = document.getElementById('save-password'),
-        useRsyncEl = document.getElementById('useRsync');
+        useRsyncEl = document.getElementById('useRsync'),
+        ignoreEl = document.getElementById('ignore'),
+        ftpPassiveEl = document.getElementById('ftpPassive'),
+        ftpSecureEl = document.getElementById('ftpSecure');
     if (passwordEl && passwordEl.value === '********') {
         config.password = undefined;
     } else if (passwordEl && passwordEl.value.trim() === '') {
@@ -81,6 +96,11 @@ function readConfig() {
     }
     config.savePassword = savePasswordEl ? savePasswordEl.checked : false;
     config.useRsync = useRsyncEl ? useRsyncEl.checked : false;
+    config.ftpPassive = ftpPassiveEl ? ftpPassiveEl.checked : true;
+    config.ftpSecure = ftpSecureEl ? ftpSecureEl.checked : false;
+    if (ignoreEl) {
+        config.ignore = ignoreEl.value.split('\n').map((line) => line.trim()).filter((line) => line.length > 0);
+    }
     return config;
 }
 

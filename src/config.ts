@@ -16,6 +16,9 @@ export interface SftpConfig {
     remotePath?: string;
     localPath?: string;
     identity?: string;
+    privateKey?: string;
+    passphrase?: string;
+    agent?: string;
     password?: string;
     savePassword?: boolean;
     debounceMs?: number;
@@ -23,6 +26,10 @@ export interface SftpConfig {
     useTeleport?: boolean;
     rsyncFlags?: string;
     sshFlags?: string;
+    ignore?: string[];
+    concurrency?: number;
+    ftpPassive?: boolean;
+    ftpSecure?: boolean;
 }
 
 const section = 'sftpPluggin';
@@ -32,6 +39,7 @@ const stringKeys: (keyof SftpConfig)[] = [
     'sftpHost', 'sftpUser',
     'ftpHost', 'ftpUser',
     'remotePath', 'localPath', 'identity',
+    'privateKey', 'passphrase', 'agent',
     'rsyncFlags', 'sshFlags'
 ];
 
@@ -64,8 +72,12 @@ export function getConfiguration(): SftpConfig {
     result.sftpPort = cfg.get<number>('sftpPort', 22) || 22;
     result.ftpPort = cfg.get<number>('ftpPort', 21) || 21;
     result.debounceMs = cfg.get<number>('debounceMs', 300);
+    result.concurrency = cfg.get<number>('concurrency', 4) || 4;
     result.useRsync = cfg.get<boolean>('useRsync', false);
     result.useTeleport = cfg.get<boolean>('useTeleport', false);
+    result.ftpPassive = cfg.get<boolean>('ftpPassive', true);
+    result.ftpSecure = cfg.get<boolean>('ftpSecure', false);
+    result.ignore = cfg.get<string[]>('ignore') ?? [];
     return result;
 }
 
@@ -89,8 +101,12 @@ export async function saveConfiguration(
     await cfg.update('sftpPort', config.sftpPort || 0, false);
     await cfg.update('ftpPort', config.ftpPort || 0, false);
     await cfg.update('debounceMs', config.debounceMs, false);
+    await cfg.update('concurrency', config.concurrency ?? 4, false);
     await cfg.update('useRsync', config.useRsync ?? false, false);
     await cfg.update('useTeleport', mode === 'teleport', false);
+    await cfg.update('ftpPassive', config.ftpPassive ?? true, false);
+    await cfg.update('ftpSecure', config.ftpSecure ?? false, false);
+    await cfg.update('ignore', config.ignore ?? [], false);
 
     if (config.savePassword && config.password) {
         await context.secrets.store('sftpPluggin.password', config.password);

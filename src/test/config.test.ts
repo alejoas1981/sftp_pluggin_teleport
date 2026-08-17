@@ -1,6 +1,6 @@
 import { expect } from 'chai';
 import * as vscode from 'vscode';
-import { buildRsyncCommand, buildFtpCommand, buildSftpLftpCommand, buildSyncCommand, validateConfig } from '../sync';
+import { validateConfig } from '../sync';
 import { saveConfiguration, deleteConfiguration, SftpConfig } from '../config';
 
 const base: SftpConfig = {
@@ -30,81 +30,6 @@ const ftpBase: SftpConfig = {
     password: 'p',
     useTeleport: false,
 };
-
-describe('buildRsyncCommand', () => {
-    it('produces base flags and trailing slashes', () => {
-        const cmd = buildRsyncCommand(base);
-        expect(cmd.command).to.equal('rsync');
-        expect(cmd.args).to.include('-avz');
-        expect(cmd.args).to.include('--delete');
-        expect(cmd.args).to.include('/local/project/');
-        expect(cmd.args).to.include('u@sftp.example.com:/home/u/project/');
-    });
-
-    it('adds dry-run flag when requested', () => {
-        const cmd = buildRsyncCommand(base, { dryRun: true });
-        expect(cmd.args).to.include('-n');
-    });
-
-    it('uses tsh ssh with cluster for teleport', () => {
-        const cmd = buildRsyncCommand(base);
-        expect(cmd.env.RSYNC_RSH).to.include('tsh ssh');
-        expect(cmd.env.RSYNC_RSH).to.include('--cluster=main');
-    });
-
-    it('uses plain ssh with identity when mode is sftp', () => {
-        const cmd = buildRsyncCommand({ ...sftpBase, identity: '/keys/id' });
-        expect(cmd.env.RSYNC_RSH).to.include('ssh');
-        expect(cmd.env.RSYNC_RSH).to.include('/keys/id');
-    });
-
-    it('appends extra ssh flags for sftp', () => {
-        const cmd = buildRsyncCommand({ ...sftpBase, identity: '/keys/id', sshFlags: '-p 2222' });
-        expect(cmd.env.RSYNC_RSH).to.include('-p 2222');
-    });
-
-    it('appends extra rsync flags', () => {
-        const cmd = buildRsyncCommand({ ...base, rsyncFlags: '--exclude .git --checksum' });
-        expect(cmd.args).to.include('--exclude');
-        expect(cmd.args).to.include('.git');
-        expect(cmd.args).to.include('--checksum');
-    });
-});
-
-describe('buildFtpCommand', () => {
-    it('produces lftp mirror command', () => {
-        const cmd = buildFtpCommand(ftpBase);
-        expect(cmd.command).to.equal('lftp');
-        expect(cmd.args[0]).to.equal('-c');
-        expect(cmd.args[1]).to.include('mirror -R');
-        expect(cmd.args[1]).to.include(ftpBase.ftpHost);
-    });
-});
-
-describe('buildSftpLftpCommand', () => {
-    it('produces an sftp lftp mirror command', () => {
-        const cmd = buildSftpLftpCommand(sftpBase);
-        expect(cmd.command).to.equal('lftp');
-        expect(cmd.args[0]).to.equal('-c');
-        expect(cmd.args[1]).to.include('sftp://');
-        expect(cmd.args[1]).to.include(sftpBase.sftpHost as string);
-    });
-});
-
-describe('buildSyncCommand', () => {
-    it('dispatches to rsync for sftp when useRsync is enabled', () => {
-        const cmd = buildSyncCommand({ ...sftpBase, useRsync: true });
-        expect(cmd.command).to.equal('rsync');
-    });
-    it('dispatches to lftp for sftp when useRsync is disabled', () => {
-        const cmd = buildSyncCommand(sftpBase);
-        expect(cmd.command).to.equal('lftp');
-    });
-    it('dispatches to lftp for ftp', () => {
-        const cmd = buildSyncCommand(ftpBase);
-        expect(cmd.command).to.equal('lftp');
-    });
-});
 
 describe('validateConfig', () => {
     it('passes with complete config', () => {
