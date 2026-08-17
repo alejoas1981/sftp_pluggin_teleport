@@ -1,10 +1,11 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
-import { getConfiguration, saveConfiguration, deleteConfiguration, getPassword, SftpConfig } from './config';
-import { runSync, testConnection, ensureTeleportSession, uploadFile, downloadFile, deleteRemoteFile } from './sync';
+import { getConfiguration, saveConfiguration, deleteConfiguration, getPassword, resolveMode, SftpConfig } from './config';
+import { runSync, testConnection, ensureTeleportSession, uploadFile, downloadFile, deleteRemoteFile, syncFile } from './sync';
 import { startWatching, stopWatching } from './watcher';
 import { createStatusBar, updateSftpStatus, startLoading, stopLoading } from './status';
+import { renderProgress } from './progress';
 
 let outputChannel: vscode.OutputChannel, extensionContext: vscode.ExtensionContext, syncInProgress = false;
 const saveReasons = new Map<string, number>();
@@ -31,7 +32,7 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.commands.registerCommand('sftpPluggin.stopWatching', stopWatcher),
         vscode.commands.registerCommand('sftpPluggin.uploadActiveFile', () => runCommand(uploadActiveFile)),
         vscode.commands.registerCommand('sftpPluggin.downloadActiveFile', () => runCommand(downloadActiveFile)),
-        vscode.commands.registerCommand('sftpPluggin.syncFile', () => runCommand(uploadActiveFile)),
+        vscode.commands.registerCommand('sftpPluggin.syncFile', () => runCommand(syncActiveFile)),
         vscode.commands.registerCommand('sftpPluggin.deleteRemote', () => runCommand(deleteActiveFile)),
         vscode.workspace.onWillSaveTextDocument(handleDocumentWillSave),
         vscode.workspace.onDidSaveTextDocument(handleDocumentSave)
@@ -49,12 +50,12 @@ export function activate(context: vscode.ExtensionContext) {
  */
 async function autoLogin(): Promise<void> {
     const config = await loadConfig();
-    if (config.useTeleport === false || !config.teleportHost) {
+    if (resolveMode(config) !== 'teleport' || !config.teleportHost) {
         stopLoading();
         return;
     }
     startLoading();
-    await ensureTeleportSession(config, { onLink: openTeleportLink });
+    await ensureTeleportIfNeeded(config);
     stopLoading();
 }
 
@@ -83,6 +84,51 @@ async function runCommand(action: (config: SftpConfig) => Promise<void> | void):
 }
 
 /**
+ * Ensures a Teleport session is active when the mode is teleport.
+ * @param config - The SFTP configuration.
+ * @returns {Promise<void>}
+ */
+async function ensureTeleportIfNeeded(config: SftpConfig): Promise<void> {
+    if (resolveMode(config) === 'teleport') {
+        await ensureTeleportSession(config, { onLink: openTeleportLink });
+    }
+}
+
+/**
+ * Resolves the absolute local root path from the configuration.
+ * @param config - The SFTP configuration.
+ * @returns {string} The absolute local root path.
+ */
+function resolveLocalRoot(config: SftpConfig): string {
+    if (!config.localPath) {
+        throw new Error('localPath is not configured');
+    }
+    let root = config.localPath;
+    if (!path.isAbsolute(root) && vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0) {
+        root = path.join(vscode.workspace.workspaceFolders[0].uri.fsPath, root);
+    }
+    return root;
+}
+
+/**
+ * Validates the active file path and runs the given action with it.
+ * @param config - The SFTP configuration.
+ * @param action - A function that receives the local file path and returns a value.
+ * @returns {Promise<[string, T]>} The local path and the action result.
+ */
+async function withActiveFile<T>(config: SftpConfig, action: (localPath: string) => Promise<T>): Promise<[string, T]> {
+    const editor = vscode.window.activeTextEditor;
+    if (!editor || editor.document.uri.scheme !== 'file') {
+        throw new Error('No active file');
+    }
+    const localPath = editor.document.fileName;
+    validateFileInLocalPath(config, localPath);
+    await ensureTeleportIfNeeded(config);
+    const result = await action(localPath);
+    return [localPath, result];
+}
+
+/**
  * Runs a sync command, optionally in dry-run mode.
  * @param config - The SFTP configuration.
  * @param dryRun - Whether to perform a dry run.
@@ -93,18 +139,27 @@ async function runSyncCommand(config: SftpConfig, dryRun: boolean): Promise<void
         outputChannel.appendLine('SFTP sync already in progress');
         return;
     }
-    if (config.useTeleport !== false) {
-        if (!config.teleportHost || !config.teleportUser) {
-            throw new Error('Teleport host and user are required');
-        }
+    if (resolveMode(config) === 'teleport' && (!config.teleportHost || !config.teleportUser)) {
+        throw new Error('Teleport host and user are required');
     }
     syncInProgress = true;
     startLoading();
     try {
-        if (config.useTeleport !== false) {
-            await ensureTeleportSession(config, { onLink: openTeleportLink });
+        await ensureTeleportIfNeeded(config);
+        const mode = resolveMode(config);
+        let result: string;
+        if (mode === 'teleport') {
+            result = await runSync(config, { dryRun });
+        } else {
+            stopLoading();
+            result = await runSync(config, {
+                dryRun,
+                onProgress: (current, total, file, action) => {
+                    const percent = total > 0 ? Math.round((current / total) * 100) : 0;
+                    updateSftpStatus(`$(sync) ${renderProgress(percent)} ${action} ${path.basename(file)}`);
+                },
+            });
         }
-        const result = await runSync(config, { dryRun });
         outputChannel.appendLine(result);
         stopLoading();
         outputChannel.appendLine(dryRun ? 'Dry run complete' : 'Sync complete');
@@ -117,56 +172,72 @@ async function runSyncCommand(config: SftpConfig, dryRun: boolean): Promise<void
 }
 
 /**
- * Tests the configured connection and logs the result.
+ * Uploads the active file to the remote server.
  * @param config - The SFTP configuration.
  * @returns {Promise<void>}
  */
 async function uploadActiveFile(config: SftpConfig): Promise<void> {
-    const editor = vscode.window.activeTextEditor;
-    if (!editor || editor.document.uri.scheme !== 'file') {
-        throw new Error('No active file');
+    startLoading();
+    try {
+        const [localPath] = await withActiveFile(config, (localPath) => uploadFile(config, localPath));
+        outputChannel.appendLine(`Uploaded ${localPath}`);
+    } finally {
+        stopLoading();
     }
-    const localPath = editor.document.fileName;
-    validateFileInLocalPath(config, localPath);
-    await uploadFile(config, localPath);
-    outputChannel.appendLine(`Uploaded ${localPath}`);
 }
 
+/**
+ * Downloads the active file from the remote server.
+ * @param config - The SFTP configuration.
+ * @returns {Promise<void>}
+ */
 async function downloadActiveFile(config: SftpConfig): Promise<void> {
-    const editor = vscode.window.activeTextEditor;
-    if (!editor || editor.document.uri.scheme !== 'file') {
-        throw new Error('No active file');
+    startLoading();
+    try {
+        const [localPath] = await withActiveFile(config, (localPath) => downloadFile(config, localPath));
+        outputChannel.appendLine(`Downloaded ${localPath}`);
+    } finally {
+        stopLoading();
     }
-    const localPath = editor.document.fileName;
-    validateFileInLocalPath(config, localPath);
-    await downloadFile(config, localPath);
-    outputChannel.appendLine(`Downloaded ${localPath}`);
 }
 
+/**
+ * Deletes the active file from the remote server.
+ * @param config - The SFTP configuration.
+ * @returns {Promise<void>}
+ */
 async function deleteActiveFile(config: SftpConfig): Promise<void> {
-    const editor = vscode.window.activeTextEditor;
-    if (!editor || editor.document.uri.scheme !== 'file') {
-        throw new Error('No active file');
-    }
-    const localPath = editor.document.fileName;
-    validateFileInLocalPath(config, localPath);
-    await deleteRemoteFile(config, localPath);
+    const [localPath] = await withActiveFile(config, (localPath) => deleteRemoteFile(config, localPath));
     outputChannel.appendLine(`Deleted remote ${localPath}`);
 }
 
+/**
+ * Syncs the active file with the remote server.
+ * @param config - The SFTP configuration.
+ * @returns {Promise<void>}
+ */
+async function syncActiveFile(config: SftpConfig): Promise<void> {
+    const [localPath, result] = await withActiveFile(config, (localPath) => syncFile(config, localPath));
+    outputChannel.appendLine(`${result}: ${localPath}`);
+}
+
+/**
+ * Validates that the given file is within the configured local path.
+ * @param config - The SFTP configuration.
+ * @param localPath - The local file path to validate.
+ * @returns {void}
+ */
 function validateFileInLocalPath(config: SftpConfig, localPath: string): void {
-    if (!config.localPath) {
-        throw new Error('localPath is not configured');
-    }
-    let root = config.localPath;
-    if (!path.isAbsolute(root) && vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0) {
-        root = path.join(vscode.workspace.workspaceFolders[0].uri.fsPath, root);
-    }
-    if (!localPath.startsWith(root)) {
+    if (!localPath.startsWith(resolveLocalRoot(config))) {
         throw new Error('Active file is outside the configured local path');
     }
 }
 
+/**
+ * Tests the configured connection and logs the result.
+ * @param config - The SFTP configuration.
+ * @returns {Promise<void>}
+ */
 async function runConnectionTest(config: SftpConfig): Promise<void> {
     startLoading();
     const result = await testConnection(config);
@@ -176,12 +247,12 @@ async function runConnectionTest(config: SftpConfig): Promise<void> {
 }
 
 /**
- * Ensures a Teleport session is active.
+ * Logs in to Teleport and logs the result.
  * @param config - The SFTP configuration.
  * @returns {Promise<void>}
  */
 async function runTeleportLogin(config: SftpConfig): Promise<void> {
-    if (config.useTeleport === false || !config.teleportHost || !config.teleportUser) {
+    if (resolveMode(config) !== 'teleport' || !config.teleportHost || !config.teleportUser) {
         throw new Error('Teleport host and user are required');
     }
     startLoading();
@@ -207,12 +278,10 @@ function startWatcher(context: vscode.ExtensionContext, config: SftpConfig): voi
         syncInProgress = true;
         startLoading();
         try {
-            if (config.useTeleport !== false) {
-                if (!config.teleportHost || !config.teleportUser) {
-                    throw new Error('Teleport host and user are required');
-                }
-                await ensureTeleportSession(config, { onLink: openTeleportLink });
+            if (resolveMode(config) === 'teleport' && (!config.teleportHost || !config.teleportUser)) {
+                throw new Error('Teleport host and user are required');
             }
+            await ensureTeleportIfNeeded(config);
             const result = await runSync(config);
             outputChannel.appendLine(result);
             stopLoading('$(eye) SFTP: watching');
@@ -425,17 +494,22 @@ function handleDocumentSave(doc: vscode.TextDocument): void {
     if (reason === undefined && !uploadOnSave) { return; }
 
     const config = getConfiguration();
-    if (!config.localPath) { return; }
-    let localPath = config.localPath;
-    if (!path.isAbsolute(localPath) && vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0) {
-        localPath = path.join(vscode.workspace.workspaceFolders[0].uri.fsPath, localPath);
+    let localPath: string;
+    try {
+        localPath = resolveLocalRoot(config);
+    } catch {
+        return;
     }
     if (!doc.fileName.startsWith(localPath)) { return; }
     if (syncInProgress) { return; }
+    startLoading();
     runCommand(async (cfg) => {
+        if (resolveMode(cfg) === 'teleport') {
+            await ensureTeleportSession(cfg, { onLink: openTeleportLink });
+        }
         await uploadFile(cfg, doc.fileName);
         outputChannel.appendLine(`Uploaded ${doc.fileName}`);
-    });
+    }).then(() => stopLoading(), () => stopLoading('$(error) SFTP: error'));
 }
 
 /**

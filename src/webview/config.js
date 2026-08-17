@@ -20,7 +20,6 @@ const vscode = acquireVsCodeApi(),
         'agent',
         'concurrency',
         'debounceMs',
-        'sshFlags',
         'rsyncFlags'
     ],
     loader = document.getElementById('loader'),
@@ -46,13 +45,11 @@ function loadConfig(config) {
         }
     }
     const passwordEl = document.getElementById('password'),
-        useRsyncEl = document.getElementById('useRsync'),
         savePasswordEl = document.getElementById('save-password'),
         ignoreEl = document.getElementById('ignore'),
         ftpPassiveEl = document.getElementById('ftpPassive'),
         ftpSecureEl = document.getElementById('ftpSecure');
     if (passwordEl) { passwordEl.value = ''; }
-    if (useRsyncEl) { useRsyncEl.checked = !!config.useRsync; }
     if (savePasswordEl) { savePasswordEl.checked = false; }
     if (ignoreEl) { ignoreEl.value = (config.ignore || []).join('\n'); }
     if (ftpPassiveEl) { ftpPassiveEl.checked = config.ftpPassive !== false; }
@@ -83,7 +80,6 @@ function readConfig() {
     }
     const passwordEl = document.getElementById('password'),
         savePasswordEl = document.getElementById('save-password'),
-        useRsyncEl = document.getElementById('useRsync'),
         ignoreEl = document.getElementById('ignore'),
         ftpPassiveEl = document.getElementById('ftpPassive'),
         ftpSecureEl = document.getElementById('ftpSecure');
@@ -95,7 +91,6 @@ function readConfig() {
         config.password = passwordEl.value;
     }
     config.savePassword = savePasswordEl ? savePasswordEl.checked : false;
-    config.useRsync = useRsyncEl ? useRsyncEl.checked : false;
     config.ftpPassive = ftpPassiveEl ? ftpPassiveEl.checked : true;
     config.ftpSecure = ftpSecureEl ? ftpSecureEl.checked : false;
     if (ignoreEl) {
@@ -156,7 +151,7 @@ function setStatus(text, type) {
 function showSettingsLink(settingsPath) {
     if (!settingsLinkEl) { return; }
     settingsLinkEl.style.display = 'block';
-    settingsLinkEl.innerHTML = '';
+    settingsLinkEl.textContent = '';
     const a = document.createElement('a');
     a.href = '#';
     a.textContent = 'Open settings.json';
@@ -192,7 +187,7 @@ function startProgress() {
     if (progressInterval) { clearInterval(progressInterval); }
     loader.style.display = 'block';
     statusEl.style.display = 'none';
-    progressBar.innerHTML = '';
+    progressBar.textContent = '';
     for (let i = 0; i < 20; i++) {
         const b = document.createElement('div');
         b.className = 'progress-block';

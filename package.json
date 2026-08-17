@@ -2,7 +2,7 @@
   "name": "sftp-pluggin",
   "displayName": "SFTP Plugin",
   "description": "VS Code plugin for SFTP with Teleport integration",
-  "version": "3.0.0",
+  "version": "3.0.2",
   "publisher": "alejoas1981",
   "author": {
     "name": "Savchenko Aleksey",
@@ -21,7 +21,31 @@
     "Other"
   ],
   "activationEvents": [
-    "onStartupFinished"
+    "onStartupFinished",
+    "onLanguage:javascript",
+    "onLanguage:typescript",
+    "onLanguage:php",
+    "onLanguage:html",
+    "onLanguage:css",
+    "onLanguage:scss",
+    "onLanguage:less",
+    "onLanguage:json",
+    "onLanguage:yaml",
+    "onLanguage:xml",
+    "onLanguage:python",
+    "onLanguage:markdown",
+    "onLanguage:plaintext",
+    "onCommand:sftpPluggin.openConfig",
+    "onCommand:sftpPluggin.syncNow",
+    "onCommand:sftpPluggin.dryRun",
+    "onCommand:sftpPluggin.startWatching",
+    "onCommand:sftpPluggin.stopWatching",
+    "onCommand:sftpPluggin.teleportLogin",
+    "onCommand:sftpPluggin.testTeleport",
+    "onCommand:sftpPluggin.uploadActiveFile",
+    "onCommand:sftpPluggin.downloadActiveFile",
+    "onCommand:sftpPluggin.syncFile",
+    "onCommand:sftpPluggin.deleteRemote"
   ],
   "main": "./out/extension.js",
   "contributes": {

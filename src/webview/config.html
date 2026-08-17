@@ -135,8 +135,6 @@
         <div class="field" data-mode="sftp"><label for="sftpHost">SFTP Host</label><input type="text" id="sftpHost"></div>
         <div class="field" data-mode="sftp"><label for="sftpUser">SFTP User</label><input type="text" id="sftpUser"></div>
         <div class="field" data-mode="sftp"><label for="sftpPort">SFTP Port</label><input type="number" id="sftpPort" placeholder="22"></div>
-        <div class="checkbox-row" data-mode="sftp"><input type="checkbox" id="useRsync"><label for="useRsync">Use rsync for SFTP (faster, requires SSH key)</label></div>
-        <p data-mode="sftp" style="font-size:12px; margin-top:2px; opacity:0.8;">If unchecked, lftp is used and supports password authentication.</p>
         <div class="field" data-mode="ftp"><label for="ftpHost">FTP Host</label><input type="text" id="ftpHost"></div>
         <div class="field" data-mode="ftp"><label for="ftpUser">FTP User</label><input type="text" id="ftpUser"></div>
         <div class="field" data-mode="ftp"><label for="ftpPort">FTP Port</label><input type="number" id="ftpPort" placeholder="21"></div>
@@ -153,8 +151,7 @@
         <div class="field"><label for="concurrency">Concurrency</label><input type="number" id="concurrency" placeholder="4"></div>
         <div class="field"><label for="ignore">Ignore patterns (one per line)</label><textarea id="ignore" rows="4" placeholder=".git\nnode_modules"></textarea></div>
         <div class="field"><label for="debounceMs">Debounce (ms)</label><input type="number" id="debounceMs" value="300"></div>
-        <div class="field" data-mode="sftp"><label for="sshFlags">Extra SSH Flags</label><input type="text" id="sshFlags" placeholder="-o StrictHostKeyChecking=no"></div>
-        <div class="field" data-mode="sftp,teleport"><label for="rsyncFlags">Extra Rsync Flags</label><input type="text" id="rsyncFlags" placeholder="--exclude .git"></div>
+        <div class="field" data-mode="teleport"><label for="rsyncFlags">Extra Rsync Flags</label><input type="text" id="rsyncFlags" placeholder="--exclude .git"></div>
         <div class="actions">
             <button type="submit" id="btn-save">
                 <svg class="btn-icon" viewBox="0 0 16 16" aria-hidden="true">
