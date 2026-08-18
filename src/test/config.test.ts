@@ -1,7 +1,7 @@
 import { expect } from 'chai';
 import * as vscode from 'vscode';
 import { validateConfig } from '../sync';
-import { saveConfiguration, deleteConfiguration, SftpConfig } from '../config';
+import { saveConfiguration, deleteConfiguration, getConfiguration, getPassword, resolveMode, SftpConfig } from '../config';
 
 const base: SftpConfig = {
     mode: 'teleport',
@@ -88,5 +88,54 @@ describe('deleteConfiguration', () => {
         expect(keys.has('sftpHost')).to.be.true;
         expect(keys.has('useRsync')).to.be.true;
         expect(keys.has('ftpHost')).to.be.false;
+    });
+});
+
+describe('resolveMode', () => {
+    it('returns explicit mode', () => {
+        expect(resolveMode({ mode: 'ftp' })).to.equal('ftp');
+        expect(resolveMode({ mode: 'sftp' })).to.equal('sftp');
+        expect(resolveMode({ mode: 'teleport' })).to.equal('teleport');
+    });
+
+    it('defaults to teleport when not disabled', () => {
+        expect(resolveMode({})).to.equal('teleport');
+        expect(resolveMode({ useTeleport: true })).to.equal('teleport');
+        expect(resolveMode({ useTeleport: undefined })).to.equal('teleport');
+    });
+
+    it('falls back to sftp when teleport disabled', () => {
+        expect(resolveMode({ useTeleport: false })).to.equal('sftp');
+    });
+});
+
+describe('getConfiguration', () => {
+    it('loads resolved config from workspace settings', () => {
+        const values = (vscode as any)._values;
+        values['mode'] = 'ftp';
+        values['ftpHost'] = 'ftp.example.com';
+        values['ftpUser'] = 'u';
+        values['ftpPort'] = 21;
+
+        const config = getConfiguration();
+
+        expect(config.mode).to.equal('ftp');
+        expect(config.ftpHost).to.equal('ftp.example.com');
+        expect(config.sftpPort).to.equal(22);
+        expect(config.concurrency).to.equal(4);
+    });
+});
+
+describe('getPassword', () => {
+    it('returns stored password', async () => {
+        const context: any = { secrets: { get: async (key: string) => key === 'sftpPluggin.password' ? 'secret' : undefined } };
+        const password = await getPassword(context);
+        expect(password).to.equal('secret');
+    });
+
+    it('returns undefined when no password stored', async () => {
+        const context: any = { secrets: { get: async () => undefined } };
+        const password = await getPassword(context);
+        expect(password).to.be.undefined;
     });
 });
