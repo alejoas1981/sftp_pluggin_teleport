@@ -1,19 +1,35 @@
 # Changelog
 
-## 3.0.0
+## [2.0.0] - Cross-Platform Release with Auto-Installer
 
 ### Added
-- Teleport mode now uses `rsync` over `tsh ssh --cluster=<cluster>` instead of direct SFTP, matching the existing shell workflow.
-- `rsyncFlags` are passed through to the `rsync` command in Teleport mode.
-- `SyncEngine` progress callback wired to the status bar during sync.
-- `syncFile` command now compares size/mtime and uploads or downloads a single file as needed.
-- `RemoteClient.stat` for SFTP, FTP, and Teleport.
-- Unit tests for `SyncEngine` covering upload, delete, skip, dry-run, and progress.
-- `CHANGELOG.md`.
+- **Full cross-platform support**: Windows, macOS, and Linux without external dependencies
+- **Automatic Teleport CLI installation**: Downloads and installs `tsh` binary automatically on first use
+- **Native Node.js file synchronization**: Replaced `rsync` with custom implementation using `ssh2` library
+- **Platform detection**: Automatic OS and architecture detection (x64, arm64) for correct binary download
+- **Binary integrity verification**: SHA256 checksum validation for downloaded Teleport binaries
+- **Unit tests**: Comprehensive test coverage for teleport installer module (22 tests)
+- **JSDoc documentation**: Full documentation for all functions and classes following Clean Code principles
+
+### Changed
+- **Removed rsync dependency**: File synchronization now uses native Node.js streams via `ssh2`
+- **Removed external tsh requirement**: Plugin automatically downloads and installs Teleport CLI if missing
+- **Improved file transfer logic**: Streaming-based file transfers with progress tracking
+- **Enhanced error handling**: Better error messages and recovery for network interruptions
+- **Updated dependencies**: Added `tar` package for archive extraction across platforms
 
 ### Fixed
-- `deleteConfiguration` now removes `privateKey`, `passphrase`, `agent`, `ignore`, `concurrency`, `ftpPassive`, and `ftpSecure`.
-- `ftpPassive` now forces `basic-ftp` into IPv4 passive mode.
+- **Windows path handling**: Proper path resolution for Windows environments
+- **Architecture detection**: Correct ARM64 support for Apple Silicon and Windows ARM
+- **Large directory sync**: Fixed issues with synchronizing directories with many files
+- **Session management**: Improved Teleport session validation and re-authentication
 
 ### Removed
-- Removed unused `useRsync` and `sshFlags` controls from the configuration webview.
+- **rsync external dependency**: No longer requires rsync to be installed
+- **Manual tsh installation**: Users no longer need to manually install Teleport CLI
+
+### Technical Notes
+- Minimum Node.js version: 18.x
+- Uses `ssh2` library for SSH/SFTP connections after `tsh login` authentication
+- Teleport binaries downloaded from official CDN (https://cdn.teleport.dev)
+- All file operations use Node.js native `fs` and `stream` modules

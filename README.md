@@ -21,22 +21,28 @@ Most teams end up with a mix of remote environments: legacy boxes that only spea
 ## What you need
 
 - Visual Studio Code 1.80+ or Devin Desktop
-- **Teleport mode only:** the `tsh` CLI in your `$PATH`
+- **No external tools required!** The plugin automatically installs Teleport CLI (`tsh`) on first use for Windows, macOS, and Linux
+- Node.js 18.x or higher
 
-No other external tools are required. FTP and SFTP transfers run through pure Node.js libraries.
+The plugin handles everything automatically:
+- Detects your operating system and architecture (x64, arm64)
+- Downloads the correct Teleport binary from the official CDN
+- Installs it in a platform-specific location
+- Manages Teleport sessions and re-authentication
 
 ## How it works
 
 1. **Activation.** The extension activates on `onStartupFinished` and reads the `sftpPluggin.*` settings.
 2. **Mode selection.** `sftpPluggin.mode` is `ftp`, `sftp`, or `teleport`. The webview sets and persists this value.
-3. **Connection ready-up.**
+3. **Teleport CLI auto-installation (Teleport mode only).** Before any Teleport operation, the plugin checks if `tsh` is available. If not, it automatically downloads and installs the correct binary for your platform.
+4. **Connection ready-up.**
    - **Teleport:** the extension runs `tsh status`; if the session is missing or expired it runs `tsh login --proxy=<teleportHost> --user=<teleportUser> [--cluster=<teleportCluster>]`, captures the browser link, and opens it with `vscode.env.openExternal`.
    - **SFTP:** `ssh2` connects to `<sftpHost>:<sftpPort>` using password, private key, passphrase, or SSH agent.
    - **FTP:** `basic-ftp` connects to `<ftpHost>:<ftpPort>` with optional explicit TLS.
-4. **Transfer.** The sync engine walks `localPath`, lists the remote tree, and uploads missing or changed files. Remote files not present locally are deleted. Empty local directories are created remotely.
-5. **Upload on save.** `onDidSaveTextDocument` triggers an upload of the saved file when `uploadOnSave` or `uploadOnAutoSave` is enabled.
-6. **File watcher.** `SFTP: Start Watching` watches `localPath/**` and runs the sync engine after `debounceMs`.
-7. **Status bar.** The status bar shows the current operation and result.
+5. **Transfer.** The sync engine walks `localPath`, lists the remote tree, and uploads missing or changed files using native Node.js streams. Remote files not present locally are deleted. Empty local directories are created remotely.
+6. **Upload on save.** `onDidSaveTextDocument` triggers an upload of the saved file when `uploadOnSave` or `uploadOnAutoSave` is enabled.
+7. **File watcher.** `SFTP: Start Watching` watches `localPath/**` and runs the sync engine after `debounceMs`.
+8. **Status bar.** The status bar shows the current operation and result.
 
 ## Install the extension
 
@@ -167,7 +173,9 @@ The test suite covers configuration validation, the webview UI interaction, the 
 
 ## Notes on the Teleport session
 
-A Teleport session is valid for about 10 hours. The extension checks the session before every sync, so when it expires the next `Ctrl+S`, `Sync Now`, or watcher-triggered sync automatically starts `tsh login` again and opens the browser. You only need to authenticate again in the browser.
+- A Teleport session is valid for about 10 hours. The extension checks the session before every sync, so when it expires the next `Ctrl+S`, `Sync Now`, or watcher-triggered sync automatically starts `tsh login` again and opens the browser.
+- **Automatic CLI installation**: If `tsh` is not found, the plugin automatically downloads and installs it for your platform (Windows, macOS, or Linux) from the official Teleport CDN.
+- **No manual setup required**: Users don't need to install Teleport CLI manually or add it to their PATH.
 
 ## Security
 
