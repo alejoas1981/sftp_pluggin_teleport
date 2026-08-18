@@ -454,11 +454,15 @@ function openConfigPanel(context: vscode.ExtensionContext) {
  * @returns {void}
  */
 function openTeleportLink(url: string): void {
-    vscode.env.openExternal(vscode.Uri.parse(url));
-    vscode.window.showInformationMessage(`Open Teleport login: ${url}`, 'Open in browser').then((choice) => {
-        if (choice === 'Open in browser') {
-            vscode.env.openExternal(vscode.Uri.parse(url));
-        }
+    vscode.env.openExternal(vscode.Uri.parse(url)).then((opened) => {
+        if (opened) { return; }
+        vscode.env.clipboard.writeText(url).then(() => {
+            vscode.window.showInformationMessage(`Could not open browser. Link copied to clipboard. ${url}`, 'Open in browser').then((choice) => {
+                if (choice === 'Open in browser') {
+                    vscode.env.openExternal(vscode.Uri.parse(url));
+                }
+            });
+        });
     });
 }
 
