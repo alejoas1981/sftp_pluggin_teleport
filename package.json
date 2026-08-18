@@ -290,8 +290,9 @@
   "devDependencies": {
     "@types/chai": "4.3.11",
     "@types/mocha": "10.0.6",
-    "@types/node": "20.11.5",
+    "@types/node": "^26.2.0",
     "@types/ssh2": "^1.15.5",
+    "@types/tar": "^6.1.13",
     "@types/vscode": "1.80.0",
     "@vscode/vsce": "2.24.0",
     "chai": "4.4.1",
@@ -304,6 +305,7 @@
     "ignore": "^5.3.2",
     "p-queue": "^6.6.2",
     "ssh2": "^1.17.0",
+    "tar": "^7.5.22",
     "upath": "^2.0.1"
   }
 }
