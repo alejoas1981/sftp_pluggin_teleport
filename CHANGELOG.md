@@ -1,19 +1,17 @@
 # Changelog
 
-## 3.0.0
+## 3.1.0
 
 ### Added
-- Teleport mode now uses `rsync` over `tsh ssh --cluster=<cluster>` instead of direct SFTP, matching the existing shell workflow.
-- `rsyncFlags` are passed through to the `rsync` command in Teleport mode.
-- `SyncEngine` progress callback wired to the status bar during sync.
-- `syncFile` command now compares size/mtime and uploads or downloads a single file as needed.
-- `RemoteClient.stat` for SFTP, FTP, and Teleport.
-- Unit tests for `SyncEngine` covering upload, delete, skip, dry-run, and progress.
-- `CHANGELOG.md`.
+- Teleport `tsh` auto-discovery and optional auto-install for macOS and Linux.
+- `tsh login` uses `--browser=none`; the SSO link is captured and opened via VS Code with a clipboard fallback.
+- `tsh` binary is searched in `PATH` and common install directories before downloading.
+- Correct CDN URL for the Teleport tarball: `teleport-v${version}-${os}-${arch}-bin.tar.gz`.
 
 ### Fixed
-- `deleteConfiguration` now removes `privateKey`, `passphrase`, `agent`, `ignore`, `concurrency`, `ftpPassive`, and `ftpSecure`.
-- `ftpPassive` now forces `basic-ftp` into IPv4 passive mode.
+- `ensureTsh` no longer tries to download when a system `tsh` is available.
+- `openTeleportLink` now falls back to clipboard if the browser cannot be opened.
 
-### Removed
-- Removed unused `useRsync` and `sshFlags` controls from the configuration webview.
+### Known limitations
+- Teleport file sync still depends on `rsync` over `tsh ssh`; `rsync` must be available locally.
+- Windows `tsh` auto-install uses a tarball and is experimental; use WSL or a manual install for best results.
