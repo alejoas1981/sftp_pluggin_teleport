@@ -2,7 +2,7 @@
   "name": "sftp-pluggin",
   "displayName": "SFTP Plugin",
   "description": "VS Code plugin for SFTP with Teleport integration",
-  "version": "3.0.2",
+  "version": "3.1.0",
   "publisher": "alejoas1981",
   "author": {
     "name": "Savchenko Aleksey",

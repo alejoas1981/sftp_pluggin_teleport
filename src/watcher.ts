@@ -2,12 +2,20 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import PQueue from 'p-queue';
 import { SftpConfig } from './config';
-import { isIgnored } from './utils';
+import { getIgnorePatterns, isIgnored } from './utils';
 
-let activeWatcher: vscode.FileSystemWatcher | undefined;
-let activeSyncQueue: PQueue | undefined;
-let debounceTimer: NodeJS.Timeout | undefined;
+let activeWatcher: vscode.FileSystemWatcher | undefined,
+    activeSyncQueue: PQueue | undefined,
+    debounceTimer: NodeJS.Timeout | undefined;
 
+/**
+ * Starts a file watcher that triggers syncFn after the configured debounce.
+ * @param context - The VS Code extension context.
+ * @param config - The SFTP configuration.
+ * @param syncFn - A function that performs the sync.
+ * @param output - The output channel for logging.
+ * @returns {void}
+ */
 export function startWatching(
     context: vscode.ExtensionContext,
     config: SftpConfig,
@@ -26,15 +34,16 @@ export function startWatching(
     activeWatcher = vscode.workspace.createFileSystemWatcher(pattern, false, false, false);
     activeSyncQueue = new PQueue({ concurrency: 1 });
 
+    /**
+     * Handles a file system event from the watcher.
+     * @param uri - The changed file URI.
+     * @returns {void}
+     */
     const onEvent = (uri: vscode.Uri) => {
         const rel = path.relative(config.localPath!, uri.fsPath).replace(/\\/g, '/');
-        if (isIgnored(rel, config.ignore ?? [])) {
-            return;
-        }
+        if (isIgnored(rel, getIgnorePatterns(config.ignore ?? []))) { return; }
         output.appendLine(`[watch] ${uri.fsPath}`);
-        if (debounceTimer) {
-            clearTimeout(debounceTimer);
-        }
+        if (debounceTimer) { clearTimeout(debounceTimer); }
         debounceTimer = setTimeout(() => {
             activeSyncQueue!.add(() => syncFn()
                 .then(() => output.appendLine('[watch] sync ok'))
@@ -50,17 +59,12 @@ export function startWatching(
     output.appendLine('[watch] started');
 }
 
+/**
+ * Stops the active file watcher and clears pending syncs.
+ * @returns {void}
+ */
 export function stopWatching(): void {
-    if (debounceTimer) {
-        clearTimeout(debounceTimer);
-        debounceTimer = undefined;
-    }
-    if (activeSyncQueue) {
-        activeSyncQueue.clear();
-        activeSyncQueue = undefined;
-    }
-    if (activeWatcher) {
-        activeWatcher.dispose();
-        activeWatcher = undefined;
-    }
+    if (debounceTimer) { clearTimeout(debounceTimer); debounceTimer = undefined; }
+    if (activeSyncQueue) { activeSyncQueue.clear(); activeSyncQueue = undefined; }
+    if (activeWatcher) { activeWatcher.dispose(); activeWatcher = undefined; }
 }

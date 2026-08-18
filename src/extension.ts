@@ -2,7 +2,8 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import { getConfiguration, saveConfiguration, deleteConfiguration, getPassword, resolveMode, SftpConfig } from './config';
-import { runSync, testConnection, ensureTeleportSession, uploadFile, downloadFile, deleteRemoteFile, syncFile } from './sync';
+import { runSync, testConnection, uploadFile, downloadFile, deleteRemoteFile, syncFile } from './sync';
+import * as tsh from './tsh';
 import { startWatching, stopWatching } from './watcher';
 import { createStatusBar, updateSftpStatus, startLoading, stopLoading } from './status';
 import { renderProgress } from './progress';
@@ -19,6 +20,10 @@ export function activate(context: vscode.ExtensionContext) {
     extensionContext = context;
     outputChannel = vscode.window.createOutputChannel('SFTP Plugin');
     context.subscriptions.push(outputChannel);
+
+    tsh.initializeTsh(context.globalStorageUri.fsPath).catch((error: any) => {
+        outputChannel.appendLine(`[tsh-init] ${error.message}`);
+    });
 
     createStatusBar(context);
 
@@ -90,7 +95,7 @@ async function runCommand(action: (config: SftpConfig) => Promise<void> | void):
  */
 async function ensureTeleportIfNeeded(config: SftpConfig): Promise<void> {
     if (resolveMode(config) === 'teleport') {
-        await ensureTeleportSession(config, { onLink: openTeleportLink });
+        await tsh.ensureTeleportSession(config, { onLink: openTeleportLink });
     }
 }
 
@@ -256,7 +261,7 @@ async function runTeleportLogin(config: SftpConfig): Promise<void> {
         throw new Error('Teleport host and user are required');
     }
     startLoading();
-    const result = await ensureTeleportSession(config, { onLink: openTeleportLink });
+    const result = await tsh.ensureTeleportSession(config, { onLink: openTeleportLink });
     outputChannel.appendLine(result);
     stopLoading();
     outputChannel.appendLine('Teleport login successful');
@@ -372,7 +377,7 @@ function openConfigPanel(context: vscode.ExtensionContext) {
                         throw new Error('Teleport host and user are required');
                     }
                     startLoading();
-                    const result = await ensureTeleportSession(cfg, { onLink: openTeleportLink });
+                    const result = await tsh.ensureTeleportSession(cfg, { onLink: openTeleportLink });
                     outputChannel.appendLine(result);
                     panel.webview.postMessage({ command: 'loginResult', status: 'ok', detail: 'Login successful' });
                     stopLoading();
@@ -505,7 +510,7 @@ function handleDocumentSave(doc: vscode.TextDocument): void {
     startLoading();
     runCommand(async (cfg) => {
         if (resolveMode(cfg) === 'teleport') {
-            await ensureTeleportSession(cfg, { onLink: openTeleportLink });
+            await tsh.ensureTeleportSession(cfg, { onLink: openTeleportLink });
         }
         await uploadFile(cfg, doc.fileName);
         outputChannel.appendLine(`Uploaded ${doc.fileName}`);
