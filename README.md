@@ -4,11 +4,11 @@ A single VS Code extension that keeps your local project folder in sync with a r
 
 ## Why this plugin
 
-Most teams end up with a mix of remote environments: legacy boxes that only speak FTP, modern cloud hosts reachable over plain SSH/SFTP, and corporate infrastructure locked behind Teleport. This extension replaces external `rsync`/`lftp`/`ssh` tools with Node.js libraries (`ssh2`, `basic-ftp`) and one consistent workflow inside VS Code.
+Most teams end up with a mix of remote environments: legacy boxes that only speak FTP, modern cloud hosts reachable over plain SSH/SFTP, and corporate infrastructure locked behind Teleport. FTP and SFTP run through pure Node.js libraries (`ssh2`, `basic-ftp`). Teleport mode wraps `tsh` and `rsync` for incremental transfers.
 
 - **One UI, three transports.** Switch between FTP, SFTP, and Teleport from a dropdown. The last selected mode is remembered.
 - **Visual config panel.** No need to hand-edit `settings.json`; the `SFTP: Open Configuration` webview writes all fields to your global IDE settings when you click **Save**.
-- **Cross-platform.** Works on Windows, macOS, and Linux without installing `rsync`, `lftp`, or `ssh`.
+- **Cross-platform.** Works on Windows, macOS, and Linux. FTP and SFTP need no external tools; Teleport mode requires `tsh` and `rsync` (see Windows and Teleport setup).
 - **Incremental sync.** Compares local and remote file lists and transfers only changed files using parallel `p-queue`.
 - **Upload on save.** Optionally upload the current file after every manual `Ctrl+S` or auto-save.
 - **File-level commands.** Upload, download, sync, or delete the remote copy of the active file from the Command Palette or editor title.
@@ -22,8 +22,9 @@ Most teams end up with a mix of remote environments: legacy boxes that only spea
 
 - Visual Studio Code 1.80+ or Devin Desktop
 - **Teleport mode only:** the `tsh` CLI in your `$PATH`
+- **Teleport mode on Windows:** `rsync` and `tsh` must be available; see [Windows and Teleport](#windows-and-teleport)
 
-No other external tools are required. FTP and SFTP transfers run through pure Node.js libraries.
+No other external tools are required for FTP and SFTP. FTP and SFTP transfers run through pure Node.js libraries.
 
 ## How it works
 
@@ -37,6 +38,33 @@ No other external tools are required. FTP and SFTP transfers run through pure No
 5. **Upload on save.** `onDidSaveTextDocument` triggers an upload of the saved file when `uploadOnSave` or `uploadOnAutoSave` is enabled.
 6. **File watcher.** `SFTP: Start Watching` watches `localPath/**` and runs the sync engine after `debounceMs`.
 7. **Status bar.** The status bar shows the current operation and result.
+
+## Windows and Teleport
+
+Teleport mode uses `rsync` over `tsh ssh`. On Windows neither `rsync` nor `tsh` is installed by default. Choose one of the following setups.
+
+### Option 1: WSL (recommended)
+
+1. Install WSL2 and a Linux distribution (for example Ubuntu).
+2. Inside WSL install `rsync`:
+   ```bash
+   sudo apt update && sudo apt install -y rsync
+   ```
+3. Install the Teleport `tsh` binary for Linux inside WSL, or let the extension download it on first use.
+4. Open the project with the **VS Code Remote - WSL** extension so the SFTP plugin runs inside WSL and can call `rsync` and `tsh` directly.
+
+### Option 2: Cygwin or MSYS2
+
+1. Install [Cygwin](https://cygwin.com/) or [MSYS2](https://www.msys2.org/) and include the `rsync` package.
+2. Add the `bin` directory (for example `C:\cygwin64\bin` or `C:\msys64\usr\bin`) to your system `PATH`.
+3. Install the Teleport `tsh.exe` binary for Windows and add its directory to `PATH`.
+4. Restart VS Code.
+
+### Option 3: Native rsync port
+
+1. Install a native Windows `rsync` port such as `cwRsync` and add it to `PATH`.
+2. Install `tsh.exe` for Windows and add it to `PATH`.
+3. Restart VS Code.
 
 ## Install the extension
 
@@ -76,6 +104,8 @@ All settings live under `sftpPluggin`. You can set them through `Settings` (`Cmd
 | `sftpPluggin.debounceMs` | `number` | `300` | Milliseconds to wait after a watcher event before syncing |
 | `sftpPluggin.uploadOnSave` | `boolean` | `true` | Upload the current file after a manual `Ctrl+S` |
 | `sftpPluggin.uploadOnAutoSave` | `boolean` | `false` | Upload the current file after VS Code auto-save |
+| `sftpPluggin.showUploadButton` | `boolean` | `false` | Show the `SFTP: Upload Active File` button in the editor title |
+| `sftpPluggin.showDownloadButton` | `boolean` | `false` | Show the `SFTP: Download Active File` button in the editor title |
 
 ## Sample `settings.json`
 
@@ -156,6 +186,8 @@ All settings live under `sftpPluggin`. You can set them through `Settings` (`Cmd
 - `SFTP: Download Active File`
 - `SFTP: Sync Active File`
 - `SFTP: Delete Remote File`
+
+The `SFTP: Upload Active File` and `SFTP: Download Active File` buttons on the editor title can be shown or hidden with the `sftpPluggin.showUploadButton` and `sftpPluggin.showDownloadButton` settings.
 
 ## Testing
 
