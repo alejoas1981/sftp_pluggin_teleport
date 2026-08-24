@@ -121,12 +121,12 @@
       "editor/title": [
         {
           "command": "sftpPluggin.uploadActiveFile",
-          "when": "resourceFilename",
+          "when": "config.sftpPluggin.showUploadButton && resourceFilename",
           "group": "navigation@1"
         },
         {
           "command": "sftpPluggin.downloadActiveFile",
-          "when": "resourceFilename",
+          "when": "config.sftpPluggin.showDownloadButton && resourceFilename",
           "group": "navigation@2"
         }
       ]
@@ -276,6 +276,16 @@
           "type": "boolean",
           "default": false,
           "description": "Upload current file after auto-save"
+        },
+        "sftpPluggin.showUploadButton": {
+          "type": "boolean",
+          "default": false,
+          "description": "Show the Upload Active File button in the editor title"
+        },
+        "sftpPluggin.showDownloadButton": {
+          "type": "boolean",
+          "default": false,
+          "description": "Show the Download Active File button in the editor title"
         }
       }
     }

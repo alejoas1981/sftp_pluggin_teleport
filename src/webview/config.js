@@ -48,12 +48,16 @@ function loadConfig(config) {
         savePasswordEl = document.getElementById('save-password'),
         ignoreEl = document.getElementById('ignore'),
         ftpPassiveEl = document.getElementById('ftpPassive'),
-        ftpSecureEl = document.getElementById('ftpSecure');
+        ftpSecureEl = document.getElementById('ftpSecure'),
+        showUploadEl = document.getElementById('showUploadButton'),
+        showDownloadEl = document.getElementById('showDownloadButton');
     if (passwordEl) { passwordEl.value = ''; }
     if (savePasswordEl) { savePasswordEl.checked = false; }
     if (ignoreEl) { ignoreEl.value = (config.ignore || []).join('\n'); }
     if (ftpPassiveEl) { ftpPassiveEl.checked = config.ftpPassive !== false; }
     if (ftpSecureEl) { ftpSecureEl.checked = !!config.ftpSecure; }
+    if (showUploadEl) { showUploadEl.checked = config.showUploadButton === true; }
+    if (showDownloadEl) { showDownloadEl.checked = config.showDownloadButton === true; }
     updateModeFields();
 }
 
@@ -82,7 +86,9 @@ function readConfig() {
         savePasswordEl = document.getElementById('save-password'),
         ignoreEl = document.getElementById('ignore'),
         ftpPassiveEl = document.getElementById('ftpPassive'),
-        ftpSecureEl = document.getElementById('ftpSecure');
+        ftpSecureEl = document.getElementById('ftpSecure'),
+        showUploadEl = document.getElementById('showUploadButton'),
+        showDownloadEl = document.getElementById('showDownloadButton');
     if (passwordEl && passwordEl.value === '********') {
         config.password = undefined;
     } else if (passwordEl && passwordEl.value.trim() === '') {
@@ -93,6 +99,8 @@ function readConfig() {
     config.savePassword = savePasswordEl ? savePasswordEl.checked : false;
     config.ftpPassive = ftpPassiveEl ? ftpPassiveEl.checked : true;
     config.ftpSecure = ftpSecureEl ? ftpSecureEl.checked : false;
+    config.showUploadButton = showUploadEl ? showUploadEl.checked : false;
+    config.showDownloadButton = showDownloadEl ? showDownloadEl.checked : false;
     if (ignoreEl) {
         config.ignore = ignoreEl.value.split('\n').map((line) => line.trim()).filter((line) => line.length > 0);
     }

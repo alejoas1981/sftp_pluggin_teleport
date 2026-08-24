@@ -30,6 +30,8 @@ export interface SftpConfig {
     concurrency?: number;
     ftpPassive?: boolean;
     ftpSecure?: boolean;
+    showUploadButton?: boolean;
+    showDownloadButton?: boolean;
 }
 
 const section = 'sftpPluggin';
@@ -57,6 +59,8 @@ const scalarSettings: { key: keyof SftpConfig; loadDefault?: any; saveValue?: (v
     { key: 'useTeleport', loadDefault: false },
     { key: 'ftpPassive', loadDefault: true, saveValue: (v) => v ?? true },
     { key: 'ftpSecure', loadDefault: false, saveValue: (v) => v ?? false },
+    { key: 'showUploadButton', loadDefault: false, saveValue: (v) => v ?? false },
+    { key: 'showDownloadButton', loadDefault: false, saveValue: (v) => v ?? false },
     { key: 'ignore', loadDefault: [], saveValue: (v) => v ?? [] },
     { key: 'concurrency', loadDefault: 4, saveValue: (v) => v ?? 4 },
 ];
