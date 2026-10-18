@@ -50,3 +50,8 @@ export function resolvePrivateKey(value?: string): Buffer | string | undefined {
     }
     return resolved;
 }
+
+/** Bounds file workers and FTP connections to the same supported range. */
+export function transferConcurrency(value: number | undefined): number {
+    return Number.isFinite(value) ? Math.max(1, Math.min(16, Math.floor(value!))) : 4;
+}

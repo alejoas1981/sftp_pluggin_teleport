@@ -1,5 +1,39 @@
 # Changelog
 
+## 3.2.0
+
+### Changed
+- Sync Now, Sync Active File, save-triggered sync and watching use the same two-way policy for FTP, SFTP and Teleport. An empty local folder imports the remote project.
+- Missing files are copied to the other side; automatic deletion and Teleport directory mirroring with `--delete` have been removed.
+- On first sync, different modification times choose the newer copy. A per-endpoint history tracks later changes and skips files changed on both sides. Explicit Upload/Download Active File resolves a file conflict and refreshes its history.
+- Transfer logs and dry runs include uploads, downloads, directory creation and conflicts.
+- Downloads use temporary files and only replace the destination after validation. Symbolic links and file/directory collisions are skipped as conflicts.
+- `.sftp-sync`, `.git` and `.vscode` are excluded from sync. History and temporary files do not trigger the watcher.
+- Teleport uses per-file rsync with fixed safe arguments; Extra Rsync Flags only accepts `--bwlimit=N`. Use Ignore patterns for exclusions.
+
+### Limitations
+- Remote change detection uses server-reported size and modification time, at one-second precision. Remote edits preserving both may not be detected. First-run files with equal size and time are treated as matching.
+- Teleport requires local `tsh`/`rsync`, remote `rsync`, and GNU `find`/`stat`. No Git installation is needed.
+
+## 3.1.2
+
+### Added
+- Scrollable live transfer log in the configuration panel for FTP, SFTP, and Teleport sync and dry runs.
+- Automatic scrolling to the log on launch, with output following that pauses when reading earlier entries.
+- Per-file start, completion, failure, and preview entries; streamed rsync output for Teleport.
+
+### Fixed
+- Replace clipped button icons with consistent SVG outlines.
+- Prevent duplicate panel operations during synchronization.
+- Dry runs no longer create the remote root directory.
+
+## 3.1.1
+
+### Fixed
+- Serialize complete FTP/FTPS operations on each connection, including directory changes and transfers, to prevent overlapping-task errors during synchronization.
+- Request FTP file size and modification time sequentially so existing files are not mistaken for missing files after a command collision.
+- Wait for pending FTP operations before closing the connection.
+
 ## 3.1.0
 
 ### Added

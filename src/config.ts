@@ -28,13 +28,24 @@ export interface SftpConfig {
     sshFlags?: string;
     ignore?: string[];
     concurrency?: number;
+    scanConcurrency?: number;
+    verifyContents?: boolean;
     ftpPassive?: boolean;
     ftpSecure?: boolean;
     showUploadButton?: boolean;
     showDownloadButton?: boolean;
 }
 
-const section = 'sftpPluggin';
+const section = 'sftpPluggin', privateConfigKey = 'sftpPluggin.privateConfiguration';
+let configurationState: vscode.Memento | undefined;
+
+export function initializeConfiguration(context: vscode.ExtensionContext): void {
+    configurationState = context.workspaceState;
+}
+
+export function hasPrivateConfiguration(): boolean {
+    return configurationState?.get(privateConfigKey) !== undefined;
+}
 
 const scalarSettings: { key: keyof SftpConfig; loadDefault?: any; saveValue?: (v: any) => any }[] = [
     { key: 'teleportHost' },
@@ -63,6 +74,8 @@ const scalarSettings: { key: keyof SftpConfig; loadDefault?: any; saveValue?: (v
     { key: 'showDownloadButton', loadDefault: false, saveValue: (v) => v ?? false },
     { key: 'ignore', loadDefault: [], saveValue: (v) => v ?? [] },
     { key: 'concurrency', loadDefault: 4, saveValue: (v) => v ?? 4 },
+    { key: 'scanConcurrency', loadDefault: 4, saveValue: (v) => v ?? 4 },
+    { key: 'verifyContents', loadDefault: false, saveValue: (v) => v ?? false },
 ];
 
 /**
@@ -78,10 +91,12 @@ export function resolveMode(config: { mode?: ConnectionMode; useTeleport?: boole
 }
 
 /**
- * Loads the SFTP plugin configuration from VS Code settings.
+ * Loads private configuration, falling back to existing VS Code settings for compatibility.
  * @returns {SftpConfig} The resolved plugin configuration.
  */
 export function getConfiguration(): SftpConfig {
+    const stored = configurationState?.get<SftpConfig>(privateConfigKey);
+    if (stored !== undefined) { return { ...stored, ignore: stored.ignore ? [...stored.ignore] : [] }; }
     const cfg = vscode.workspace.getConfiguration(section),
         mode = resolveMode({
             mode: cfg.get<ConnectionMode>('mode'),
@@ -95,7 +110,7 @@ export function getConfiguration(): SftpConfig {
 }
 
 /**
- * Persists the provided configuration to VS Code settings and stores the password if requested.
+ * Persists the provided configuration to private workspace state and stores the password if requested.
  * @param context - The VS Code extension context.
  * @param config - The configuration to save.
  * @returns {Promise<void>}
@@ -104,16 +119,15 @@ export async function saveConfiguration(
     context: vscode.ExtensionContext,
     config: SftpConfig
 ): Promise<void> {
-    const cfg = vscode.workspace.getConfiguration(section),
-        mode = resolveMode(config);
-
-    await cfg.update('mode', mode, false);
+    const mode = resolveMode(config), saved: SftpConfig = { mode };
     for (const { key, saveValue } of scalarSettings) {
         if (key === 'useTeleport') { continue; }
-        const raw = (config as any)[key];
-        await cfg.update(key as string, saveValue ? saveValue(raw) : raw, false);
+        const raw = config[key];
+        (saved as any)[key] = saveValue ? saveValue(raw) : raw;
     }
-    await cfg.update('useTeleport', mode === 'teleport', false);
+    saved.useTeleport = mode === 'teleport';
+    await context.workspaceState.update(privateConfigKey, saved);
+    configurationState = context.workspaceState;
 
     if (config.savePassword && config.password) {
         await context.secrets.store('sftpPluggin.password', config.password);
@@ -121,9 +135,9 @@ export async function saveConfiguration(
 }
 
 const keysByMode: Record<ConnectionMode, string[]> = {
-    ftp: ['mode', 'ftpHost', 'ftpUser', 'ftpPort', 'ftpPassive', 'ftpSecure', 'remotePath', 'localPath', 'debounceMs', 'concurrency', 'ignore'],
-    sftp: ['mode', 'sftpHost', 'sftpUser', 'sftpPort', 'useRsync', 'identity', 'privateKey', 'passphrase', 'agent', 'sshFlags', 'remotePath', 'localPath', 'debounceMs', 'concurrency', 'ignore'],
-    teleport: ['mode', 'teleportHost', 'teleportUser', 'teleportCluster', 'sftpHost', 'sftpUser', 'sftpPort', 'useRsync', 'identity', 'privateKey', 'passphrase', 'agent', 'sshFlags', 'rsyncFlags', 'useTeleport', 'remotePath', 'localPath', 'debounceMs', 'concurrency', 'ignore']
+    ftp: ['mode', 'ftpHost', 'ftpUser', 'ftpPort', 'ftpPassive', 'ftpSecure', 'remotePath', 'localPath', 'debounceMs', 'concurrency', 'scanConcurrency', 'verifyContents', 'ignore'],
+    sftp: ['mode', 'sftpHost', 'sftpUser', 'sftpPort', 'useRsync', 'identity', 'privateKey', 'passphrase', 'agent', 'sshFlags', 'remotePath', 'localPath', 'debounceMs', 'concurrency', 'scanConcurrency', 'verifyContents', 'ignore'],
+    teleport: ['mode', 'teleportHost', 'teleportUser', 'teleportCluster', 'sftpHost', 'sftpUser', 'sftpPort', 'useRsync', 'identity', 'privateKey', 'passphrase', 'agent', 'sshFlags', 'rsyncFlags', 'useTeleport', 'remotePath', 'localPath', 'debounceMs', 'concurrency', 'scanConcurrency', 'verifyContents', 'ignore']
 };
 
 /**
@@ -133,14 +147,14 @@ const keysByMode: Record<ConnectionMode, string[]> = {
  * @returns {Promise<void>}
  */
 export async function deleteConfiguration(
-    _context: vscode.ExtensionContext,
+    context: vscode.ExtensionContext,
     mode: ConnectionMode
 ): Promise<void> {
-    const cfg = vscode.workspace.getConfiguration(section),
-        keys = keysByMode[mode] || [];
-    for (const key of keys) {
-        await cfg.update(key, undefined, false);
-    }
+    const saved = getConfiguration(), keys = keysByMode[mode] || [];
+    for (const key of keys) { delete (saved as any)[key]; }
+    saved.mode = saved.mode ?? 'ftp';
+    await context.workspaceState.update(privateConfigKey, saved);
+    configurationState = context.workspaceState;
 }
 
 /**

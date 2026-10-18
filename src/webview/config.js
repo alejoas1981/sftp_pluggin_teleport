@@ -19,14 +19,82 @@ const vscode = acquireVsCodeApi(),
         'passphrase',
         'agent',
         'concurrency',
+        'scanConcurrency',
         'debounceMs',
         'rsyncFlags'
     ],
     loader = document.getElementById('loader'),
     progressBar = document.getElementById('progress-bar'),
     progressPercent = document.getElementById('progress-percent'),
-    statusEl = document.getElementById('status');
-let progressInterval = null;
+    statusEl = document.getElementById('status'),
+    activityPanel = document.getElementById('activity-panel'),
+    activityLog = document.getElementById('activity-log');
+let progressInterval = null, progressHideTimeout = null, syncRunning = false;
+
+let activityLines = [];
+
+function renderActivity() {
+    const follow = activityLog.scrollHeight - activityLog.scrollTop - activityLog.clientHeight < 40;
+    activityLog.textContent = '';
+    for (const text of activityLines) {
+        const line = document.createElement('span');
+        line.className = text.includes(' — started') ? 'log-started' : text.includes(' — done') ? 'log-done'
+            : text.includes(' — failed') || text.startsWith('ERROR:') ? 'log-error' : '';
+        line.textContent = text;
+        activityLog.appendChild(line);
+    }
+    if (follow) { activityLog.scrollTop = activityLog.scrollHeight; }
+}
+
+function appendActivity(text) {
+    activityLines.push(text);
+    activityLines = activityLines.slice(-500);
+    renderActivity();
+}
+
+function renderSyncState(state) {
+    if (!state) { return; }
+    clearInterval(progressInterval);
+    clearTimeout(progressHideTimeout);
+    progressInterval = null;
+    progressHideTimeout = null;
+    setSyncRunning(state.status === 'running');
+    activityPanel.hidden = false;
+    loader.style.display = 'block';
+    if (!progressBar.children.length) { createProgressBlocks(); }
+    updateProgress(state.percent ?? 0);
+    progressBar.classList.toggle('indeterminate', state.percent === undefined && syncRunning);
+    progressPercent.textContent = `${state.phase} | ${state.percent === undefined ? 'Working…' : state.percent + '%'} | `
+        + `Files: ${state.current}/${state.total ?? '?'} | Local: ${state.localFiles} | Remote: ${state.remoteFiles} | `
+        + `Directories: ${state.directories} | Hash cache: ${state.cachedFiles ?? 0} reused / ${state.hashedFiles ?? 0} read | Completed file bytes: ${state.completedBytes}/${state.totalBytes ?? '?'} | `
+        + `${Math.floor(state.elapsedMs / 1000)}s | ${state.file}`;
+    activityLines = state.logs;
+    renderActivity();
+    if (state.result) { setStatus(state.result, state.status === 'complete' ? 'ok' : state.status); }
+}
+
+function setSyncRunning(running) {
+    syncRunning = running;
+    for (const id of ['sync-now', 'dry-run', 'btn-save', 'delete-config', 'test-connection', 'teleport-login']) {
+        document.getElementById(id).disabled = running;
+    }
+}
+
+function startSync(command) {
+    if (syncRunning) { return; }
+    setSyncRunning(true);
+    activityPanel.hidden = false;
+    activityLines = [];
+    activityLog.textContent = '';
+    activityLog.scrollTop = 0;
+    appendActivity(command === 'dryRun' ? 'Preparing preview…\n' : 'Preparing synchronization…\n');
+    startProgress();
+    clearInterval(progressInterval);
+    progressInterval = null;
+    progressPercent.textContent = 'Working…';
+    activityPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    vscode.postMessage({ command });
+}
 
 /**
  * Loads configuration values into the webview form fields.
@@ -56,6 +124,7 @@ function loadConfig(config) {
     if (ignoreEl) { ignoreEl.value = (config.ignore || []).join('\n'); }
     if (ftpPassiveEl) { ftpPassiveEl.checked = config.ftpPassive !== false; }
     if (ftpSecureEl) { ftpSecureEl.checked = !!config.ftpSecure; }
+    document.getElementById('verifyContents').checked = !!config.verifyContents;
     if (showUploadEl) { showUploadEl.checked = config.showUploadButton === true; }
     if (showDownloadEl) { showDownloadEl.checked = config.showDownloadButton === true; }
     updateModeFields();
@@ -72,7 +141,7 @@ function readConfig() {
         if (el) {
             if (field === 'debounceMs') {
                 config[field] = Number(el.value) || 300;
-            } else if (field === 'concurrency') {
+            } else if (field === 'concurrency' || field === 'scanConcurrency') {
                 config[field] = Number(el.value) || 4;
             } else if (field === 'sftpPort' || field === 'ftpPort') {
                 const defaultPort = field === 'sftpPort' ? 22 : 21;
@@ -99,6 +168,7 @@ function readConfig() {
     config.savePassword = savePasswordEl ? savePasswordEl.checked : false;
     config.ftpPassive = ftpPassiveEl ? ftpPassiveEl.checked : true;
     config.ftpSecure = ftpSecureEl ? ftpSecureEl.checked : false;
+    config.verifyContents = document.getElementById('verifyContents').checked;
     config.showUploadButton = showUploadEl ? showUploadEl.checked : false;
     config.showDownloadButton = showDownloadEl ? showDownloadEl.checked : false;
     if (ignoreEl) {
@@ -192,22 +262,24 @@ function updateProgress(percent) {
  * @returns {void}
  */
 function startProgress() {
+    if (progressHideTimeout) { clearTimeout(progressHideTimeout); progressHideTimeout = null; }
     if (progressInterval) { clearInterval(progressInterval); }
+    activityPanel.hidden = false;
     loader.style.display = 'block';
+    if (!syncRunning) { loader.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); }
     statusEl.style.display = 'none';
+    createProgressBlocks();
+    progressBar.classList.toggle('indeterminate', true);
+    progressPercent.textContent = 'Working…';
+}
+
+function createProgressBlocks() {
     progressBar.textContent = '';
     for (let i = 0; i < 20; i++) {
-        const b = document.createElement('div');
-        b.className = 'progress-block';
-        progressBar.appendChild(b);
+        const block = document.createElement('div');
+        block.className = 'progress-block';
+        progressBar.appendChild(block);
     }
-    let percent = 0;
-    updateProgress(0);
-    progressInterval = setInterval(() => {
-        percent += 1;
-        if (percent > 95) { percent = 95; }
-        updateProgress(percent);
-    }, 100);
 }
 
 /**
@@ -216,8 +288,8 @@ function startProgress() {
  */
 function stopProgress() {
     if (progressInterval) { clearInterval(progressInterval); progressInterval = null; }
-    updateProgress(100);
-    setTimeout(() => {
+    progressBar.classList.toggle('indeterminate', false);
+    progressHideTimeout = setTimeout(() => {
         loader.style.display = 'none';
         statusEl.style.display = 'block';
     }, 250);
@@ -246,13 +318,11 @@ document.getElementById('test-connection').addEventListener('click', () => {
 });
 
 document.getElementById('dry-run').addEventListener('click', () => {
-    startProgress();
-    vscode.postMessage({ command: 'dryRun' });
+    startSync('dryRun');
 });
 
 document.getElementById('sync-now').addEventListener('click', () => {
-    startProgress();
-    vscode.postMessage({ command: 'sync' });
+    startSync('sync');
 });
 
 document.getElementById('delete-config').addEventListener('click', () => {
@@ -263,6 +333,9 @@ document.getElementById('delete-config').addEventListener('click', () => {
 window.addEventListener('message', (event) => {
     const message = event.data;
     switch (message.command) {
+        case 'syncState':
+            renderSyncState(message.state);
+            break;
         case 'load':
             loadConfig(message.config);
             const modeEl = document.getElementById('mode');
@@ -277,17 +350,26 @@ window.addEventListener('message', (event) => {
             break;
         case 'saved':
             stopProgress();
-            setStatus('Configuration saved', 'ok');
+            setStatus('Configuration saved privately for this workspace', 'ok');
             if (message.settingsPath) { showSettingsLink(message.settingsPath); }
             break;
         case 'error':
+            if (syncRunning) { appendActivity(`ERROR: ${message.detail}\n`); setSyncRunning(false); }
             stopProgress();
             setStatus(message.detail, 'error');
             break;
         case 'loginResult':
         case 'testResult':
             if (message.status === 'ok' && teleportLoginEl) { teleportLoginEl.hidden = true; }
+            stopProgress();
+            setStatus(message.detail, message.status);
+            break;
+        case 'syncLog':
+            appendActivity(message.text);
+            break;
         case 'syncResult':
+            appendActivity(`${message.status === 'error' ? 'ERROR: ' : ''}${message.detail}\n`);
+            setSyncRunning(false);
             stopProgress();
             setStatus(message.detail, message.status);
             break;
@@ -318,3 +400,5 @@ if (document.readyState !== 'loading') {
 } else {
     window.addEventListener('DOMContentLoaded', notifyReady);
 }
+
+window.addEventListener('focus', () => vscode.postMessage({ command: 'getSyncState' }));

@@ -61,4 +61,14 @@ describe('watcher', () => {
 
         expect(calls).to.equal(0);
     });
+    it('ignores internal sync history and temporary downloads', async () => {
+        let calls = 0;
+        startWatching(context, { localPath: tempDir, debounceMs: 20 }, async () => { calls += 1; }, output);
+        const watcher = context.subscriptions[0];
+        watcher._trigger('didCreate', vscode.Uri.file(path.join(tempDir, '.sftp-sync', 'state.json')));
+        watcher._trigger('didChange', vscode.Uri.file(path.join(tempDir, '.sftp-sync', 'download.tmp')));
+        await new Promise((resolve) => setTimeout(resolve, 60));
+        expect(calls).to.equal(0);
+    });
+
 });

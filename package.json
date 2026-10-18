@@ -2,7 +2,7 @@
   "name": "sftp-pluggin",
   "displayName": "SFTP Plugin",
   "description": "VS Code plugin for SFTP with Teleport integration",
-  "version": "3.1.0",
+  "version": "3.2.0",
   "publisher": "alejoas1981",
   "author": {
     "name": "Savchenko Aleksey",
@@ -223,9 +223,11 @@
           "description": "Patterns to ignore during sync"
         },
         "sftpPluggin.concurrency": {
-          "type": "number",
+          "type": "integer",
           "default": 4,
-          "description": "Number of parallel file transfers"
+          "description": "Parallel file transfers: 1 for sequential, 2\u201316 for simultaneous transfers (separate connections for FTP/FTPS)",
+          "minimum": 1,
+          "maximum": 16
         },
         "sftpPluggin.ftpPassive": {
           "type": "boolean",
@@ -235,7 +237,7 @@
         "sftpPluggin.ftpSecure": {
           "type": "boolean",
           "default": false,
-          "description": "Use FTPS (TLS) — encrypted FTP connection; enable if the server requires AUTH TLS"
+          "description": "Use FTPS (TLS) \u2014 encrypted FTP connection; enable if the server requires AUTH TLS"
         },
         "sftpPluggin.identity": {
           "type": "string",
@@ -270,12 +272,12 @@
         "sftpPluggin.uploadOnSave": {
           "type": "boolean",
           "default": true,
-          "description": "Upload current file after manual save (Ctrl+S)"
+          "description": "Synchronize current file after manual save (Ctrl+S), with conflict detection"
         },
         "sftpPluggin.uploadOnAutoSave": {
           "type": "boolean",
           "default": false,
-          "description": "Upload current file after auto-save"
+          "description": "Synchronize current file after auto-save, with conflict detection"
         },
         "sftpPluggin.showUploadButton": {
           "type": "boolean",
@@ -286,6 +288,18 @@
           "type": "boolean",
           "default": false,
           "description": "Show the Download Active File button in the editor title"
+        },
+        "sftpPluggin.scanConcurrency": {
+          "type": "integer",
+          "default": 4,
+          "minimum": 1,
+          "maximum": 16,
+          "description": "Parallel remote directory listings for FTP/FTPS, SFTP and Teleport. Set 1 for servers that require sequential scanning."
+        },
+        "sftpPluggin.verifyContents": {
+          "type": "boolean",
+          "default": false,
+          "description": "Read all local file contents during analysis instead of reusing hashes for unchanged metadata."
         }
       }
     }

@@ -54,6 +54,10 @@
             margin-top: 10px;
         }
         button {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
             padding: 8px 16px;
             font-size: 13px;
             cursor: pointer;
@@ -76,7 +80,23 @@
             display: inline-block;
             vertical-align: middle;
             margin-right: 4px;
-            shape-rendering: crispEdges;
+            shape-rendering: geometricPrecision;
+            flex-shrink: 0;
+            overflow: visible;
+        }
+        #activity-panel { max-width: 760px; margin-top: 20px; scroll-margin-top: 16px; }
+        #activity-panel h2 { font-size: 14px; }
+        #activity-log {
+            height: 260px;
+            overflow: auto;
+            white-space: pre-wrap;
+            overflow-wrap: anywhere;
+            padding: 12px;
+            border: 1px solid var(--vscode-panel-border, #555);
+            border-radius: 4px;
+            background: var(--vscode-terminal-background, #181818);
+            color: var(--vscode-terminal-foreground, #eee);
+            font: 12px/1.6 var(--vscode-editor-font-family, monospace);
         }
         #status {
             margin-top: 16px;
@@ -85,6 +105,7 @@
             min-height: 1.2em;
         }
         #status.ok { color: var(--vscode-terminal-ansiGreen); }
+        #status.warning { color: var(--vscode-editorWarning-foreground, #cca700); }
         #status.error { color: var(--vscode-terminal-ansiRed); }
         #loader { display: none; margin-top: 16px; }
         .progress-outer {
@@ -115,11 +136,17 @@
             font-size: 13px;
             font-family: var(--vscode-font-family, monospace);
         }
+        .log-started { color: var(--vscode-charts-blue, #3794ff); }
+        .log-done { color: var(--vscode-testing-iconPassed, #73c991); }
+        .log-error { color: var(--vscode-errorForeground, #f48771); }
+        .progress-bar.indeterminate { animation: working 1.2s ease-in-out infinite alternate; background: var(--vscode-progressBar-background); }
+        @keyframes working { from { opacity: .3; } to { opacity: 1; } }
     </style>
 </head>
 <body>
     <h1>FTP SFTP Teleport Config</h1>
-    <p>1. Select mode, fill the fields and click Save. 2. Login or Test as needed. 3. Sync or Dry Run.</p>
+    <p>1. Select mode, fill the fields and click Save. 2. Login or Test as needed. 3. Preview with Dry Run, then Sync Now.</p>
+    <p>Two-way sync: missing files are copied to the other side; newer versions are transferred in either direction. Conflicts are skipped. Files are never deleted automatically. An empty local folder imports the remote project.</p>
     <form id="config-form">
         <div class="field">
             <label for="mode">Connection Mode</label>
@@ -150,58 +177,51 @@
         <div class="field" data-mode="sftp,teleport"><label for="agent">SSH Agent</label><input type="text" id="agent" placeholder="/run/user/1000/ssh-agent or pageant"></div>
         <div class="field"><label for="password">Password (stored securely)</label><input type="password" id="password" placeholder="leave empty to keep existing"></div>
         <div class="checkbox-row"><input type="checkbox" id="save-password"><label for="save-password">Save password</label></div>
-        <div class="field"><label for="concurrency">Concurrency</label><input type="number" id="concurrency" placeholder="4"></div>
+        <div class="field"><label for="scanConcurrency">Parallel directory scans (1–16)</label><input type="number" id="scanConcurrency" min="1" max="16" step="1" placeholder="4"></div>
+        <div class="checkbox-row"><input type="checkbox" id="verifyContents"><label for="verifyContents">Full local content verification (bypass hash cache)</label></div>
+        <div class="field"><label for="concurrency">Parallel transfers (1 = one file, 2–16 = multiple)</label><input type="number" id="concurrency" min="1" max="16" step="1" placeholder="4"></div>
         <div class="field"><label for="ignore">Ignore patterns (one per line)</label><textarea id="ignore" rows="4" placeholder=".git\nnode_modules"></textarea></div>
         <div class="field"><label for="debounceMs">Debounce (ms)</label><input type="number" id="debounceMs" value="300"></div>
-        <div class="field" data-mode="teleport"><label for="rsyncFlags">Extra Rsync Flags</label><input type="text" id="rsyncFlags" placeholder="--exclude .git"></div>
+        <div class="field" data-mode="teleport"><label for="rsyncFlags">Rsync bandwidth limit (optional)</label><input type="text" id="rsyncFlags" placeholder="--bwlimit=1000"></div>
         <div class="actions">
             <button type="submit" id="btn-save">
-                <svg class="btn-icon" viewBox="0 0 16 16" aria-hidden="true">
-                    <path fill-rule="evenodd" d="M2 1h12v14H2V1zm2 2h8v4H4V3zm1 6h6v4H5v-4z" fill="currentColor"/>
-                </svg>
+                <svg class="btn-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 2h9l2 2v10H2V2h1zM5 2v4h6V2M5 14V9h6v5"/></svg>
                 Save
             </button>
             <button type="button" id="teleport-login" data-mode="teleport">
-                <svg class="btn-icon" viewBox="0 0 16 16" aria-hidden="true">
-                    <path fill-rule="evenodd" d="M5 3h6v3H5V3zm-1 4h8v8H4V7zm3 4v-2h2v2H7z" fill="currentColor"/>
-                </svg>
+                <svg class="btn-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="7" width="10" height="7" rx="1"/><path d="M5 7V5a3 3 0 0 1 6 0v2M8 10v2"/></svg>
                 Login to Teleport
             </button>
             <button type="button" id="test-connection">
-                <svg class="btn-icon" viewBox="0 0 16 16" aria-hidden="true">
-                    <path d="M5 1h1v3H5V1zm4 0h1v3H9V1zM4 5h8v2H4V5zm1 2h6v7H5V7z" fill="currentColor"/>
-                </svg>
+                <svg class="btn-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 2v4M11 2v4M4 6h8v2a4 4 0 0 1-8 0V6zM8 12v2"/></svg>
                 Test Connection
             </button>
             <button type="button" id="dry-run">
-                <svg class="btn-icon" viewBox="0 0 16 16" aria-hidden="true">
-                    <circle cx="6" cy="6" r="3" fill="none" stroke="currentColor" stroke-width="2"/>
-                    <line x1="9" y1="9" x2="13" y2="13" stroke="currentColor" stroke-width="2"/>
-                </svg>
+                <svg class="btn-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="7" cy="7" r="4"/><path d="m10 10 4 4"/></svg>
                 Dry Run
             </button>
             <button type="button" id="sync-now">
-                <svg class="btn-icon" viewBox="0 0 16 16" aria-hidden="true">
-                    <path d="M3 5l3-3v2h5v2H6v2H3V5zm7 6l3 3v-2h3v-2h-5V8l-1 3z" fill="currentColor"/>
-                </svg>
+                <svg class="btn-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 5h12M11 2l3 3-3 3M14 11H2M5 8l-3 3 3 3"/></svg>
                 Sync Now
             </button>
             <button type="button" id="delete-config" class="btn-danger">
-                <svg class="btn-icon" viewBox="0 0 16 16" aria-hidden="true">
-                    <path fill-rule="evenodd" d="M5 3h6v1H5V3zm-2 2h10v1H3V5zm2 2h1v7H5V7zm3 0h1v7H8V7zm3 0h1v7h-1V7z" fill="currentColor"/>
-                </svg>
+                <svg class="btn-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 4h12M6 4V2h4v2M4 4l1 10h6l1-10M7 7v4M9 7v4"/></svg>
                 Delete Config
             </button>
         </div>
     </form>
     <div id="status"></div>
     <div id="settings-link" style="display:none; margin-top:8px; font-size:13px;"></div>
+    <section id="activity-panel" hidden aria-label="Synchronization activity">
+        <h2>Transfer log</h2>
+        <pre id="activity-log" role="log" aria-live="polite" aria-relevant="text" tabindex="0"></pre>
     <div id="loader">
         <div class="progress-outer">
             <div id="progress-bar" class="progress-bar"></div>
         </div>
-        <div class="progress-label">Loading <span id="progress-percent">0%</span></div>
+        <div class="progress-label"><span id="progress-percent">0%</span></div>
     </div>
+    </section>
     {{script}}
 </body>
 </html>

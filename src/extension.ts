@@ -1,14 +1,16 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
-import { getConfiguration, saveConfiguration, deleteConfiguration, getPassword, resolveMode, SftpConfig } from './config';
+import { getConfiguration, initializeConfiguration, hasPrivateConfiguration, saveConfiguration, deleteConfiguration, getPassword, resolveMode, SftpConfig } from './config';
 import { runSync, testConnection, ensureTeleportSession, uploadFile, downloadFile, deleteRemoteFile, syncFile } from './sync';
 import { startWatching, stopWatching } from './watcher';
 import { createStatusBar, updateSftpStatus, startLoading, stopLoading } from './status';
 import { renderProgress } from './progress';
+import { SyncTask } from './sync-task';
+import { configureStorage } from './private-storage';
 
 let outputChannel: vscode.OutputChannel, extensionContext: vscode.ExtensionContext, syncInProgress = false;
-const saveReasons = new Map<string, number>();
+const saveReasons = new Map<string, number>(), syncTask = new SyncTask();
 
 /**
  * Activates the SFTP plugin and registers commands and event listeners.
@@ -17,10 +19,18 @@ const saveReasons = new Map<string, number>();
  */
 export function activate(context: vscode.ExtensionContext) {
     extensionContext = context;
+    initializeConfiguration(context);
+    configureStorage(context.globalStorageUri.fsPath, vscode.workspace.workspaceFolders?.map((folder) => folder.uri.fsPath));
     outputChannel = vscode.window.createOutputChannel('SFTP Plugin');
     context.subscriptions.push(outputChannel);
 
     createStatusBar(context);
+    const unsubscribe = syncTask.subscribe((state) => {
+        const icon = state.status === 'running' ? 'sync~spin' : state.status === 'error' ? 'error' : state.status === 'warning' ? 'warning' : 'check',
+            progress = state.percent === undefined ? '' : renderProgress(state.percent) + ' ';
+        updateSftpStatus(`$(${icon}) SFTP: ${progress}${state.phase}`, `${state.phase}\n${state.file}\nFiles: ${state.current}/${state.total ?? '?'} | Local: ${state.localFiles} | Remote: ${state.remoteFiles} | ${Math.floor(state.elapsedMs / 1000)}s`);
+    });
+    context.subscriptions.push({ dispose: () => { unsubscribe(); syncTask.dispose(); } });
 
     context.subscriptions.push(
         vscode.commands.registerCommand('sftpPluggin.openConfig', () => openConfigPanel(context)),
@@ -73,9 +83,10 @@ async function loadConfig(): Promise<SftpConfig> {
  * @param action - A function that receives the loaded configuration.
  * @returns {Promise<void>}
  */
-async function runCommand(action: (config: SftpConfig) => Promise<void> | void): Promise<void> {
+async function runCommand(action: (config: SftpConfig) => Promise<unknown> | void): Promise<void> {
     const config = await loadConfig();
     try {
+        if (syncInProgress) { throw new Error('SFTP sync already in progress'); }
         await action(config);
     } catch (error: any) {
         outputChannel.appendLine(`[error] ${error.message}`);
@@ -134,37 +145,29 @@ async function withActiveFile<T>(config: SftpConfig, action: (localPath: string)
  * @param dryRun - Whether to perform a dry run.
  * @returns {Promise<void>}
  */
-async function runSyncCommand(config: SftpConfig, dryRun: boolean): Promise<void> {
+async function runSyncCommand(config: SftpConfig, dryRun: boolean): Promise<string> {
     if (syncInProgress) {
-        outputChannel.appendLine('SFTP sync already in progress');
-        return;
+        throw new Error('SFTP sync already in progress');
     }
     if (resolveMode(config) === 'teleport' && (!config.teleportHost || !config.teleportUser)) {
         throw new Error('Teleport host and user are required');
     }
     syncInProgress = true;
-    startLoading();
+    stopLoading();
+    syncTask.start(dryRun);
     try {
+        syncTask.log(`${dryRun ? 'DRY RUN' : 'SYNC'}: two-way (${resolveMode(config).toUpperCase()})\nConnecting…\n`);
         await ensureTeleportIfNeeded(config);
-        const mode = resolveMode(config);
-        let result: string;
-        if (mode === 'teleport') {
-            result = await runSync(config, { dryRun });
-        } else {
-            stopLoading();
-            result = await runSync(config, {
-                dryRun,
-                onProgress: (current, total, file, action) => {
-                    const percent = total > 0 ? Math.round((current / total) * 100) : 0;
-                    updateSftpStatus(`$(sync) ${renderProgress(percent)} ${action} ${path.basename(file)}`);
-                },
-            });
-        }
+        const result = await runSync(config, {
+            dryRun,
+            onLog: (text) => { syncTask.log(text); outputChannel.appendLine(text.trimEnd()); },
+            onState: (state) => syncTask.update(state),
+        });
         outputChannel.appendLine(result);
-        stopLoading();
-        outputChannel.appendLine(dryRun ? 'Dry run complete' : 'Sync complete');
+        syncTask.finish(result);
+        return result;
     } catch (error: any) {
-        stopLoading('$(error) SFTP: error');
+        syncTask.finish(error.message, true);
         throw error;
     } finally {
         syncInProgress = false;
@@ -275,22 +278,7 @@ function startWatcher(context: vscode.ExtensionContext, config: SftpConfig): voi
      */
     const doSync = async (): Promise<void> => {
         if (syncInProgress) { return; }
-        syncInProgress = true;
-        startLoading();
-        try {
-            if (resolveMode(config) === 'teleport' && (!config.teleportHost || !config.teleportUser)) {
-                throw new Error('Teleport host and user are required');
-            }
-            await ensureTeleportIfNeeded(config);
-            const result = await runSync(config);
-            outputChannel.appendLine(result);
-            stopLoading('$(eye) SFTP: watching');
-        } catch (error: any) {
-            stopLoading('$(error) SFTP: error');
-            throw error;
-        } finally {
-            syncInProgress = false;
-        }
+        await runSyncCommand(config, false);
     };
 
     startWatching(context, config, doSync, outputChannel);
@@ -304,7 +292,7 @@ function startWatcher(context: vscode.ExtensionContext, config: SftpConfig): voi
  */
 function stopWatcher(): void {
     stopWatching();
-    stopLoading();
+    if (!syncInProgress) { stopLoading(); }
     outputChannel.appendLine('SFTP watcher stopped');
 }
 
@@ -331,37 +319,54 @@ function openConfigPanel(context: vscode.ExtensionContext) {
 
     html = html.replace(/{{script}}/g, `<script type="text/javascript">\n${jsContent}\n</script>`);
 
+    let disposed = false;
+    const post = (message: unknown) => {
+        if (disposed) { return; }
+        try { Promise.resolve(panel.webview.postMessage(message)).catch(() => { /* Detached UI cannot fail a task. */ }); }
+        catch { /* VS Code may throw synchronously after disposal. */ }
+    },
+        unsubscribe = syncTask.subscribe((state) => post({ command: 'syncState', state }));
+    panel.onDidDispose(() => { disposed = true; unsubscribe(); });
+
     panel.webview.html = html;
 
     const workspaceFolder = vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0
             ? vscode.workspace.workspaceFolders[0].uri.fsPath
-            : undefined,
-        settingsPath = workspaceFolder ? path.join(workspaceFolder, '.vscode', 'settings.json') : undefined;
+            : undefined;
 
     panel.webview.onDidReceiveMessage(async (message) => {
+        if (syncInProgress && ['save', 'deleteConfig', 'login', 'test'].includes(message.command)) {
+            post({ command: 'syncState', state: syncTask.snapshot() });
+            return;
+        }
         switch (message.command) {
+            case 'getSyncState': {
+                post({ command: 'syncState', state: syncTask.snapshot() });
+                break;
+            }
             case 'ready': {
+                post({ command: 'syncState', state: syncTask.snapshot() });
                 const cfg = getConfiguration();
                 if (workspaceFolder && !cfg.localPath) { cfg.localPath = workspaceFolder; }
                 const hasPassword = (await getPassword(context)) !== undefined,
                     sectionConfig = vscode.workspace.getConfiguration('sftpPluggin'),
                     modeInspect = sectionConfig.inspect('mode'),
-                    hasSavedConfig = modeInspect ? modeInspect.workspaceValue !== undefined : false;
+                    hasSavedConfig = hasPrivateConfiguration() || (modeInspect ? modeInspect.workspaceValue !== undefined : false);
                 let isLoggedIn = false;
                 if (cfg.mode === 'teleport' && cfg.teleportHost && cfg.teleportUser) {
                     isLoggedIn = await testConnection(cfg).then(() => true).catch(() => false);
                 }
-                panel.webview.postMessage({ command: 'load', config: cfg, hasPassword, hasSavedConfig, isLoggedIn });
+                post({ command: 'load', config: cfg, hasPassword, hasSavedConfig, isLoggedIn });
                 break;
             }
             case 'save': {
                 try {
                     await saveConfiguration(context, message.config);
-                    panel.webview.postMessage({ command: 'saved', settingsPath });
+                    post({ command: 'saved' });
                     outputChannel.appendLine('SFTP configuration saved');
                 } catch (error: any) {
                     outputChannel.appendLine(`[save error] ${error.message}`);
-                    panel.webview.postMessage({ command: 'error', detail: error.message });
+                    post({ command: 'error', detail: error.message });
                 }
                 break;
             }
@@ -374,10 +379,10 @@ function openConfigPanel(context: vscode.ExtensionContext) {
                     startLoading();
                     const result = await ensureTeleportSession(cfg, { onLink: openTeleportLink });
                     outputChannel.appendLine(result);
-                    panel.webview.postMessage({ command: 'loginResult', status: 'ok', detail: 'Login successful' });
+                    post({ command: 'loginResult', status: 'ok', detail: 'Login successful' });
                     stopLoading();
                 } catch (error: any) {
-                    panel.webview.postMessage({ command: 'loginResult', status: 'error', detail: error.message });
+                    post({ command: 'loginResult', status: 'error', detail: error.message });
                     stopLoading('$(error) SFTP: error');
                 }
                 break;
@@ -389,32 +394,23 @@ function openConfigPanel(context: vscode.ExtensionContext) {
                     startLoading();
                     const result = await testConnection(cfg);
                     stopLoading();
-                    panel.webview.postMessage({ command: 'testResult', status: 'ok', detail: result });
+                    post({ command: 'testResult', status: 'ok', detail: result });
                 } catch (error: any) {
                     stopLoading('$(error) SFTP: error');
-                    panel.webview.postMessage({ command: 'testResult', status: 'error', detail: error.message });
+                    post({ command: 'testResult', status: 'error', detail: error.message });
                 }
                 break;
             }
-            case 'sync': {
-                try {
-                    const cfg = await loadConfig();
-                    if (syncInProgress) { throw new Error('Sync already in progress'); }
-                    await runSyncCommand(cfg, false);
-                    panel.webview.postMessage({ command: 'syncResult', status: 'ok', detail: 'Sync complete' });
-                } catch (error: any) {
-                    panel.webview.postMessage({ command: 'syncResult', status: 'error', detail: error.message });
-                }
-                break;
-            }
+            case 'sync':
             case 'dryRun': {
                 try {
                     const cfg = await loadConfig();
-                    if (syncInProgress) { throw new Error('Sync already in progress'); }
-                    await runSyncCommand(cfg, true);
-                    panel.webview.postMessage({ command: 'syncResult', status: 'ok', detail: 'Dry run complete' });
+                    await runSyncCommand(cfg, message.command === 'dryRun');
                 } catch (error: any) {
-                    panel.webview.postMessage({ command: 'syncResult', status: 'error', detail: error.message });
+                    post({ command: 'syncState', state: syncTask.snapshot() });
+                    if (!syncInProgress && syncTask.snapshot()?.result !== error.message) {
+                        post({ command: 'error', detail: error.message });
+                    }
                 }
                 break;
             }
@@ -438,7 +434,7 @@ function openConfigPanel(context: vscode.ExtensionContext) {
                     );
                 if (choice === 'Delete') {
                     await deleteConfiguration(context, mode as any);
-                    panel.webview.postMessage({ command: 'deleted' });
+                    post({ command: 'deleted' });
                     outputChannel.appendLine(`${modeLabel} configuration deleted`);
                 }
                 break;
@@ -511,8 +507,9 @@ function handleDocumentSave(doc: vscode.TextDocument): void {
         if (resolveMode(cfg) === 'teleport') {
             await ensureTeleportSession(cfg, { onLink: openTeleportLink });
         }
-        await uploadFile(cfg, doc.fileName);
-        outputChannel.appendLine(`Uploaded ${doc.fileName}`);
+        const result = await syncFile(cfg, doc.fileName);
+        outputChannel.appendLine(`${result}: ${doc.fileName}`);
+        if (result.includes('WITH CONFLICTS')) { vscode.window.showWarningMessage(result); }
     }).then(() => stopLoading(), () => stopLoading('$(error) SFTP: error'));
 }
 
@@ -521,5 +518,6 @@ function handleDocumentSave(doc: vscode.TextDocument): void {
  * @returns {void}
  */
 export function deactivate() {
+    syncTask.dispose();
     stopWatching();
 }

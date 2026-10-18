@@ -3,6 +3,7 @@ import * as path from 'path';
 import PQueue from 'p-queue';
 import { SftpConfig } from './config';
 import { isIgnored } from './utils';
+import { SYNC_EXCLUDES } from './sync-state';
 
 let activeWatcher: vscode.FileSystemWatcher | undefined;
 let activeSyncQueue: PQueue | undefined;
@@ -28,7 +29,7 @@ export function startWatching(
 
     const onEvent = (uri: vscode.Uri) => {
         const rel = path.relative(config.localPath!, uri.fsPath).replace(/\\/g, '/');
-        if (isIgnored(rel, config.ignore ?? [])) {
+        if (isIgnored(rel, [...(config.ignore ?? []), ...SYNC_EXCLUDES])) {
             return;
         }
         output.appendLine(`[watch] ${uri.fsPath}`);

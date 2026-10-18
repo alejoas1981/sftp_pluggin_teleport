@@ -9,3 +9,5 @@ vscode-sftp-plugin/
 *.vsix
 !build/*.vsix
 .windsurfrules
+
+.sftp-sync/

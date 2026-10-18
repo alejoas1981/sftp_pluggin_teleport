@@ -1,7 +1,7 @@
 import { expect } from 'chai';
 import * as vscode from 'vscode';
 import { validateConfig } from '../sync';
-import { saveConfiguration, deleteConfiguration, getConfiguration, getPassword, resolveMode, SftpConfig } from '../config';
+import { saveConfiguration, initializeConfiguration, deleteConfiguration, getConfiguration, getPassword, resolveMode, SftpConfig } from '../config';
 
 const base: SftpConfig = {
     mode: 'teleport',
@@ -44,9 +44,19 @@ describe('validateConfig', () => {
     });
 });
 
+function privateContext() {
+    const values = new Map<string, any>(), context: any = {
+        workspaceState: { get: (key: string) => values.get(key),
+            update: async (key: string, value: any) => { values.set(key, JSON.parse(JSON.stringify(value))); } },
+        secrets: { store: async () => undefined }
+    };
+    return context;
+}
+
 describe('saveConfiguration', () => {
-    it('writes all GUI fields to workspace settings.json', async () => {
-        const context: any = { secrets: { store: async () => undefined } };
+    it('stores GUI fields privately without writing workspace settings', async () => {
+        const context = privateContext();
+        initializeConfiguration(context);
         const config: SftpConfig = {
             mode: 'sftp',
             sftpHost: 'sftp.example.com',
@@ -61,33 +71,24 @@ describe('saveConfiguration', () => {
         };
         (vscode as any)._reset();
         await saveConfiguration(context, config);
-        const updates = (vscode as any)._updates as { key: string; value: any; global: boolean }[];
-        expect(updates.every(u => u.global === false)).to.be.true;
-        const byKey = new Map(updates.map(u => [u.key, u.value]));
-        expect(byKey.get('mode')).to.equal('sftp');
-        expect(byKey.get('sftpHost')).to.equal('sftp.example.com');
-        expect(byKey.get('sftpUser')).to.equal('u');
-        expect(byKey.get('remotePath')).to.equal('/home/u/project');
-        expect(byKey.get('localPath')).to.equal('/local/project');
-        expect(byKey.get('identity')).to.equal('~/.ssh/id');
-        expect(byKey.get('sshFlags')).to.equal('-p 2222');
-        expect(byKey.get('rsyncFlags')).to.equal('--exclude .git');
-        expect(byKey.get('debounceMs')).to.equal(300);
-        expect(byKey.get('useTeleport')).to.equal(false);
+        expect((vscode as any)._updates).to.have.length(0);
+        expect(getConfiguration()).to.include(config);
+        expect(getConfiguration()).not.to.have.property('password');
+
     });
 });
 
 describe('deleteConfiguration', () => {
-    it('removes only the selected mode settings', async () => {
-        const context: any = { secrets: { delete: async () => undefined } };
+    it('removes private mode fields without changing user-managed settings', async () => {
+        const context = privateContext();
+        initializeConfiguration(context);
         (vscode as any)._reset();
+        await saveConfiguration(context, { ...sftpBase, ftpHost: 'keep' });
         await deleteConfiguration(context, 'sftp');
-        const updates = (vscode as any)._updates as { key: string; value: any; global: boolean }[];
-        expect(updates.every(u => u.global === false && u.value === undefined)).to.be.true;
-        const keys = new Set(updates.map(u => u.key));
-        expect(keys.has('sftpHost')).to.be.true;
-        expect(keys.has('useRsync')).to.be.true;
-        expect(keys.has('ftpHost')).to.be.false;
+        expect((vscode as any)._updates).to.have.length(0);
+        expect(getConfiguration().sftpHost).to.equal(undefined);
+        expect(getConfiguration().ftpHost).to.equal('keep');
+        expect(getConfiguration().mode).to.equal('ftp');
     });
 });
 
@@ -111,6 +112,7 @@ describe('resolveMode', () => {
 
 describe('getConfiguration', () => {
     it('loads resolved config from workspace settings', () => {
+        initializeConfiguration(privateContext());
         const values = (vscode as any)._values;
         values['mode'] = 'ftp';
         values['ftpHost'] = 'ftp.example.com';

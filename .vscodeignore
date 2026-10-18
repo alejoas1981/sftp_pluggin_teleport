@@ -3,3 +3,7 @@ src/**
 !src/webview/**
 out/test/**
 **/*.map
+
+build/**
+
+.sftp-sync/**

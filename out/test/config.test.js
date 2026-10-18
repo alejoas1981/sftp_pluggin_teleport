@@ -63,9 +63,18 @@ describe('validateConfig', () => {
         (0, chai_1.expect)(() => (0, sync_1.validateConfig)(incomplete)).to.throw(/sftpHost/);
     });
 });
+function privateContext() {
+    const values = new Map(), context = {
+        workspaceState: { get: (key) => values.get(key),
+            update: async (key, value) => { values.set(key, JSON.parse(JSON.stringify(value))); } },
+        secrets: { store: async () => undefined }
+    };
+    return context;
+}
 describe('saveConfiguration', () => {
-    it('writes all GUI fields to workspace settings.json', async () => {
-        const context = { secrets: { store: async () => undefined } };
+    it('stores GUI fields privately without writing workspace settings', async () => {
+        const context = privateContext();
+        (0, config_1.initializeConfiguration)(context);
         const config = {
             mode: 'sftp',
             sftpHost: 'sftp.example.com',
@@ -80,32 +89,22 @@ describe('saveConfiguration', () => {
         };
         vscode._reset();
         await (0, config_1.saveConfiguration)(context, config);
-        const updates = vscode._updates;
-        (0, chai_1.expect)(updates.every(u => u.global === false)).to.be.true;
-        const byKey = new Map(updates.map(u => [u.key, u.value]));
-        (0, chai_1.expect)(byKey.get('mode')).to.equal('sftp');
-        (0, chai_1.expect)(byKey.get('sftpHost')).to.equal('sftp.example.com');
-        (0, chai_1.expect)(byKey.get('sftpUser')).to.equal('u');
-        (0, chai_1.expect)(byKey.get('remotePath')).to.equal('/home/u/project');
-        (0, chai_1.expect)(byKey.get('localPath')).to.equal('/local/project');
-        (0, chai_1.expect)(byKey.get('identity')).to.equal('~/.ssh/id');
-        (0, chai_1.expect)(byKey.get('sshFlags')).to.equal('-p 2222');
-        (0, chai_1.expect)(byKey.get('rsyncFlags')).to.equal('--exclude .git');
-        (0, chai_1.expect)(byKey.get('debounceMs')).to.equal(300);
-        (0, chai_1.expect)(byKey.get('useTeleport')).to.equal(false);
+        (0, chai_1.expect)(vscode._updates).to.have.length(0);
+        (0, chai_1.expect)((0, config_1.getConfiguration)()).to.include(config);
+        (0, chai_1.expect)((0, config_1.getConfiguration)()).not.to.have.property('password');
     });
 });
 describe('deleteConfiguration', () => {
-    it('removes only the selected mode settings', async () => {
-        const context = { secrets: { delete: async () => undefined } };
+    it('removes private mode fields without changing user-managed settings', async () => {
+        const context = privateContext();
+        (0, config_1.initializeConfiguration)(context);
         vscode._reset();
+        await (0, config_1.saveConfiguration)(context, { ...sftpBase, ftpHost: 'keep' });
         await (0, config_1.deleteConfiguration)(context, 'sftp');
-        const updates = vscode._updates;
-        (0, chai_1.expect)(updates.every(u => u.global === false && u.value === undefined)).to.be.true;
-        const keys = new Set(updates.map(u => u.key));
-        (0, chai_1.expect)(keys.has('sftpHost')).to.be.true;
-        (0, chai_1.expect)(keys.has('useRsync')).to.be.true;
-        (0, chai_1.expect)(keys.has('ftpHost')).to.be.false;
+        (0, chai_1.expect)(vscode._updates).to.have.length(0);
+        (0, chai_1.expect)((0, config_1.getConfiguration)().sftpHost).to.equal(undefined);
+        (0, chai_1.expect)((0, config_1.getConfiguration)().ftpHost).to.equal('keep');
+        (0, chai_1.expect)((0, config_1.getConfiguration)().mode).to.equal('ftp');
     });
 });
 describe('resolveMode', () => {
@@ -125,6 +124,7 @@ describe('resolveMode', () => {
 });
 describe('getConfiguration', () => {
     it('loads resolved config from workspace settings', () => {
+        (0, config_1.initializeConfiguration)(privateContext());
         const values = vscode._values;
         values['mode'] = 'ftp';
         values['ftpHost'] = 'ftp.example.com';

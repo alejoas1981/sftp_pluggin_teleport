@@ -1,0 +1,88 @@
+import { randomUUID } from 'crypto';
+
+export interface SyncProgress {
+    phase: string;
+    current: number;
+    total?: number;
+    completedBytes: number;
+    totalBytes?: number;
+    cachedFiles?: number;
+    hashedFiles?: number;
+    localFiles: number;
+    remoteFiles: number;
+    directories: number;
+    file: string;
+    percent?: number;
+    planId?: string;
+}
+
+export interface TaskSnapshot extends SyncProgress {
+    id: string;
+    dryRun: boolean;
+    status: 'running' | 'complete' | 'warning' | 'error';
+    startedAt: number;
+    elapsedMs: number;
+    logs: string[];
+    result?: string;
+}
+
+/** Extension-owned state. Observer failure can never fail the synchronization. */
+export class SyncTask {
+    private state?: TaskSnapshot;
+    private readonly listeners = new Set<(state: TaskSnapshot) => void>();
+    private timer?: ReturnType<typeof setInterval>;
+
+    snapshot(): TaskSnapshot | undefined {
+        return this.state ? { ...this.state, logs: [...this.state.logs] } : undefined;
+    }
+
+    subscribe(listener: (state: TaskSnapshot) => void): () => void {
+        this.listeners.add(listener);
+        return () => this.listeners.delete(listener);
+    }
+
+    start(dryRun: boolean): void {
+        if (this.state?.status === 'running') { throw new Error('Sync already in progress'); }
+        this.state = { id: randomUUID(), dryRun, status: 'running', startedAt: Date.now(), elapsedMs: 0,
+            phase: 'Connecting', current: 0, completedBytes: 0, localFiles: 0, remoteFiles: 0,
+            directories: 0, file: '', logs: [] };
+        this.publish();
+        this.timer = setInterval(() => this.publish(), 250);
+        this.timer.unref?.();
+    }
+
+    update(progress: Partial<SyncProgress>): void {
+        if (this.state) { Object.assign(this.state, progress); }
+    }
+
+    log(text: string): void {
+        if (!this.state) { return; }
+        this.state.logs.push(text.slice(-2000));
+        if (this.state.logs.length > 500) { this.state.logs.shift(); }
+    }
+
+    finish(result: string, error = false): void {
+        if (!this.state) { return; }
+        clearInterval(this.timer);
+        this.timer = undefined;
+        this.log(result + '\n');
+        Object.assign(this.state, { result, status: error ? 'error' : result.includes('WITH CONFLICTS') ? 'warning' : 'complete',
+            phase: error ? this.state.phase + ' — failed' : this.state.dryRun ? 'Analysis complete' : 'Sync complete',
+            percent: error ? this.state.percent : 100 });
+        this.publish();
+    }
+
+    dispose(): void {
+        clearInterval(this.timer);
+        this.listeners.clear();
+    }
+
+    private publish(): void {
+        if (!this.state) { return; }
+        this.state.elapsedMs = Date.now() - this.state.startedAt;
+        for (const listener of this.listeners) {
+            try { listener(this.snapshot()!); }
+            catch { /* A disposed observer is detached; transfer state remains owned here. */ this.listeners.delete(listener); }
+        }
+    }
+}
