@@ -96,6 +96,7 @@ const vscodeMock = {
     _willSaveListeners: willSaveListeners,
     _didSaveListeners: didSaveListeners,
     workspace: {
+        textDocuments: [] as any[],
         workspaceFolders: [] as any[],
         getConfiguration: (_section: string) => ({
             get: (key: string, defaultValue?: any) => getValue(key, defaultValue),

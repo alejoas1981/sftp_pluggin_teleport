@@ -23,7 +23,10 @@ describe('extension', () => {
         (vscode as any)._values['localPath'] = tempDir;
         syncCalls = [];
         watcherCalls = [];
+        (vscode.workspace as any).textDocuments = [];
+        (vscode as any)._values['debounceMs'] = 50;
         syncMock = {
+            uploadChangedFiles: async () => { syncCalls.push('uploadChanged'); return 'UPLOAD COMPLETE'; },
             runSync: async (config: any, options: any) => {
                 syncCalls.push(`runSync:${options?.dryRun ?? 'false'}`);
                 return 'SYNC COMPLETE';
@@ -155,5 +158,61 @@ describe('extension', () => {
             }
         });
     }
+
+    function save(file: string, reason: number) {
+        const document = { fileName: file, uri: vscode.Uri.file(file) };
+        (vscode as any)._willSaveListeners[0]({ document, reason });
+        (vscode as any)._didSaveListeners[0](document);
+    }
+
+    it('coalesces manual saves and saves other dirty project documents before uploading', async () => {
+        let saved = false;
+        (vscode.workspace as any).textDocuments = [{ isDirty: true, fileName: path.join(tempDir, 'other.txt'),
+            uri: vscode.Uri.file(path.join(tempDir, 'other.txt')), save: async () => {
+                saved = true; save(path.join(tempDir, 'other.txt'), 1); return true;
+            } }];
+        syncMock.uploadChangedFiles = async () => { expect(saved).to.equal(true); syncCalls.push('uploadChanged'); return 'UPLOAD COMPLETE'; };
+        ext.activate(context);
+        save(path.join(tempDir, 'a.txt'), 1); save(path.join(tempDir, 'b.txt'), 1);
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        expect(syncCalls.filter((call) => call === 'uploadChanged')).to.have.length(1);
+        expect(syncCalls.some((call) => call.startsWith('syncFile') || call.startsWith('runSync'))).to.equal(false);
+    });
+
+    it('honors disabled save modes and excludes adjacent roots', async () => {
+        (vscode as any)._values.uploadOnSave = false;
+        (vscode as any)._values.uploadOnAutoSave = false;
+        ext.activate(context);
+        save(path.join(tempDir, 'a.txt'), 1); save(path.join(tempDir, 'a.txt'), 2);
+        (vscode as any)._values.uploadOnSave = true;
+        save(tempDir + '-other/a.txt', 1);
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        expect(syncCalls).not.to.include('uploadChanged');
+    });
+
+    it('queues another upload when a save arrives during a running upload', async () => {
+        let release!: () => void;
+        const blocked = new Promise<void>((resolve) => { release = resolve; });
+        syncMock.uploadChangedFiles = async () => {
+            syncCalls.push('uploadChanged');
+            if (syncCalls.filter((call) => call === 'uploadChanged').length === 1) { await blocked; }
+            return 'UPLOAD COMPLETE';
+        };
+        ext.activate(context); save(path.join(tempDir, 'a.txt'), 1);
+        await new Promise((resolve) => setTimeout(resolve, 80));
+        save(path.join(tempDir, 'b.txt'), 1);
+        await new Promise((resolve) => setTimeout(resolve, 80));
+        expect(syncCalls.filter((call) => call === 'uploadChanged')).to.have.length(1);
+        release(); await new Promise((resolve) => setTimeout(resolve, 100));
+        expect(syncCalls.filter((call) => call === 'uploadChanged')).to.have.length(2);
+    });
+
+    it('uploads external filesystem edits when auto-save uploads are enabled', async () => {
+        (vscode as any)._values.uploadOnAutoSave = true;
+        ext.activate(context);
+        (vscode as any)._watchers[0]._trigger('didChange', vscode.Uri.file(path.join(tempDir, 'ai-edit.txt')));
+        await new Promise((resolve) => setTimeout(resolve, 120));
+        expect(syncCalls).to.include('uploadChanged');
+    });
 
 });

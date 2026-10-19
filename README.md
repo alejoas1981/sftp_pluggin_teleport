@@ -10,7 +10,7 @@ Most teams end up with a mix of remote environments: legacy boxes that only spea
 - **Visual config panel.** No need to hand-edit `settings.json`; the `SFTP: Open Configuration` webview stores configuration privately for this workspace when you click **Save**.
 - **Cross-platform.** Works on Windows, macOS, and Linux. FTP and SFTP need no external tools; Teleport mode requires `tsh` and `rsync` (see Windows and Teleport setup).
 - **Incremental sync.** Compares local and remote file lists and transfers changed files with bounded parallel workers; FTP/FTPS uses a pool of separate connections.
-- **Sync on save.** Optionally synchronize the current file after a manual `Ctrl+S` or auto-save, with conflict detection.
+- **Sync on save.** Upload all locally changed project files after a manual `Ctrl+S` or auto-save.
 - **File-level commands.** Upload, download, sync, or delete the remote copy of the active file from the Command Palette or editor title.
 - **Continuous watching.** Run `SFTP: Start Watching` to sync automatically when files change, with a configurable debounce.
 - **Dry run.** Preview changes without writing project files or sync history, then reuse the validated plan in Sync Now.
@@ -35,7 +35,7 @@ No other external tools are required for FTP and SFTP. FTP and SFTP transfers ru
    - **SFTP:** `ssh2` connects to `<sftpHost>:<sftpPort>` using password, private key, passphrase, or SSH agent.
    - **FTP:** `basic-ftp` connects to `<ftpHost>:<ftpPort>` with optional explicit TLS.
 4. **Two-way transfer.** The sync engine lists both trees. Remote-only files and directories are downloaded; local-only files and directories are uploaded. On the first run, modification times select the newer version. Later runs use history to detect changes on both sides and skip conflicts. Files are never deleted automatically.
-5. **Sync on save.** `onDidSaveTextDocument` synchronizes the saved file with the same conflict checks when `uploadOnSave` or `uploadOnAutoSave` is enabled.
+5. **Sync on save.** Save events queue a batch upload of locally changed files when `uploadOnSave` or `uploadOnAutoSave` is enabled; this does not run two-way synchronization.
 6. **File watcher.** `SFTP: Start Watching` watches `localPath/**` and runs the sync engine after `debounceMs`.
 7. **Status bar.** The status bar shows the current operation and result.
 
@@ -185,8 +185,8 @@ The configuration panel saves values in private VS Code workspace state, outside
 | `sftpPluggin.scanConcurrency` | `integer` | `4` | Parallel remote directory listings and prepared-plan validation, from `1` to `16`, for all transports |
 | `sftpPluggin.verifyContents` | `boolean` | `false` | Bypass the local hash cache and read all local file contents during analysis |
 | `sftpPluggin.debounceMs` | `number` | `300` | Milliseconds to wait after a watcher event before syncing |
-| `sftpPluggin.uploadOnSave` | `boolean` | `true` | Synchronize the current file after a manual `Ctrl+S`, with conflict checks |
-| `sftpPluggin.uploadOnAutoSave` | `boolean` | `false` | Synchronize the current file after VS Code auto-save, with conflict checks |
+| `sftpPluggin.uploadOnSave` | `boolean` | `true` | Upload all local changes after manual save; local copies are authoritative |
+| `sftpPluggin.uploadOnAutoSave` | `boolean` | `false` | Upload all local changes after auto-save or workspace filesystem edits; local copies are authoritative |
 | `sftpPluggin.showUploadButton` | `boolean` | `false` | Show the `SFTP: Upload Active File` button in the editor title |
 | `sftpPluggin.showDownloadButton` | `boolean` | `false` | Show the `SFTP: Download Active File` button in the editor title |
 
@@ -302,3 +302,15 @@ A Teleport session is valid for about 10 hours. The extension checks the session
 ## Contributing and license
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) and [LICENSE](LICENSE).
+
+## Upload all local changes on save (3.2.0)
+
+With `sftpPluggin.uploadOnSave: true`, a manual save queues an upload of all locally changed files under the configured local path, including edits made to other files by an IDE or external tool. With `sftpPluggin.uploadOnAutoSave: true`, automatic document saves and file creation/change events inside the open workspace trigger the same queue. Files outside the open workspace are discovered by the next eligible document-save batch, rather than watched automatically. Neither option runs a full remote directory scan. The separate Start Watching command retains its two-way synchronization behavior.
+
+Before uploading, the extension saves other dirty, file-backed documents in the configured project. Ignored paths, other projects and untitled documents are excluded. A failed document save stops the batch. VS Code controls its own Auto Save timing; this extension setting controls uploads and does not enable the editor's Auto Save preference.
+
+Each batch scans local metadata using the private hash cache and compares contents with the last successful transfer history for this endpoint. It checks remote metadata only for candidates and their parents, then uploads with the configured transfer concurrency. No downloads or automatic deletions occur. Local versions intentionally replace remote versions, even if the server was edited separately. Use Sync Now instead when you need two-way conflict detection.
+
+Without history, the first batch checks every local file against remote size/time. Equal metadata establishes a baseline without uploading; missing or different destinations receive the local copy. Equal size/time cannot prove identical contents. For an existing remote project, establish the desired state with a reviewed sync before enabling automatic uploads. Later batches send only changed or new local contents. A deleted local file does not delete or restore its remote copy in this mode.
+
+Save bursts are debounced using `debounceMs`. A save arriving during a transfer queues another pass; full synchronization and active-file operations defer queued uploads. Successful files retain their history if another file fails. Failures appear in the log and notification; the next save retries outstanding differences without an automatic retry loop. Closing the configuration panel does not stop the queue. Restarting VS Code discards pending events, but the next save discovers remaining changes from persistent history.

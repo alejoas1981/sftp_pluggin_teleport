@@ -420,4 +420,70 @@ describe('two-way sync', () => {
         expect(remote.downloads.concat(remote.uploads, remote.mkdirs)).to.have.length(0);
     });
 
+    for (const mode of ['ftp', 'sftp', 'teleport'] as const) {
+        it(`uploads only local changes without remote listing via ${mode}`, async () => {
+            writeLocal('a.txt', 'one'); writeLocal('b.txt', 'two'); writeLocal('stable.txt', 'stable');
+            await new SyncEngine(config(mode)).sync(remote);
+            remote.uploads.length = 0;
+            remote.list = async () => { throw new Error('Must not scan remote tree'); };
+            writeLocal('a.txt', 'new a'); writeLocal('b.txt', 'new b');
+            writeLocal('nested/new.txt', 'new');
+            remote.files.set('/remote/server-only.txt', { content: 'server', time: 1900000000000 });
+            remote.files.set('/remote/a.txt', { content: 'remote edit', time: 1900000000000 });
+            await new SyncEngine(config(mode)).uploadChanged(remote);
+            expect(remote.uploads.sort()).to.deep.equal(['/remote/a.txt', '/remote/b.txt', '/remote/nested/new.txt']);
+            expect(remote.downloads.concat(remote.deletes)).to.have.length(0);
+            expect(remote.files.get('/remote/a.txt')!.content).to.equal('new a');
+            remote.uploads.length = 0;
+            await new SyncEngine(config(mode)).uploadChanged(remote);
+            expect(remote.uploads).to.have.length(0);
+        });
+    }
+
+    it('retries failed local uploads without resending successful files', async () => {
+        writeLocal('a.txt', 'a'); writeLocal('b.txt', 'b');
+        const put = remote.put.bind(remote);
+        remote.put = async (local, target) => {
+            if (target.endsWith('b.txt')) { throw new Error('offline'); }
+            await put(local, target);
+        };
+        try { await new SyncEngine({ ...config(), concurrency: 1 }).uploadChanged(remote); }
+        catch (error: any) { expect(error.message).to.equal('offline'); }
+        remote.put = put;
+        await new SyncEngine(config()).uploadChanged(remote);
+        expect(remote.uploads).to.deep.equal(['/remote/a.txt', '/remote/b.txt']);
+    });
+
+    it('excludes ignored files and does not propagate local deletion during upload', async () => {
+        writeLocal('keep.txt', 'keep'); await run();
+        fs.unlinkSync(path.join(localRoot, 'keep.txt'));
+        writeLocal('ignored.txt', 'ignore');
+        await new SyncEngine({ ...config(), ignore: ['ignored.txt'] }).uploadChanged(remote);
+        expect(remote.files.has('/remote/keep.txt')).to.equal(true);
+        expect(remote.uploads).to.deep.equal(['/remote/keep.txt']);
+    });
+
+    it('establishes an upload baseline without transferring equal metadata on the first run', async () => {
+        writeLocal('a.txt', 'same');
+        remote.files.set('/remote/a.txt', { content: 'same', time: 1700000000000 });
+        remote.list = async () => { throw new Error('Unexpected listing'); };
+        await new SyncEngine(config()).uploadChanged(remote);
+        expect(remote.uploads).to.have.length(0);
+        writeLocal('a.txt', 'edit');
+        await new SyncEngine(config()).uploadChanged(remote);
+        expect(remote.uploads).to.deep.equal(['/remote/a.txt']);
+    });
+
+    it('does not record success for a local file modified during upload', async () => {
+        writeLocal('a.txt', 'one');
+        const put = remote.put.bind(remote);
+        remote.put = async (local, target) => { await put(local, target); writeLocal('a.txt', 'two'); };
+        let failure: any;
+        try { await new SyncEngine(config()).uploadChanged(remote); } catch (error) { failure = error; }
+        expect(failure.message).to.include('File changed during transfer');
+        remote.put = put;
+        await new SyncEngine(config()).uploadChanged(remote);
+        expect(remote.files.get('/remote/a.txt')!.content).to.equal('two');
+    });
+
 });

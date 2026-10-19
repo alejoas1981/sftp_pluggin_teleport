@@ -28,6 +28,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.SyncEngine = void 0;
 exports.runSync = runSync;
+exports.uploadChangedFiles = uploadChangedFiles;
 exports.uploadFile = uploadFile;
 exports.downloadFile = downloadFile;
 exports.deleteRemoteFile = deleteRemoteFile;
@@ -704,6 +705,11 @@ async function runRemoteAction(config, action) {
 async function runSync(config, options = {}) {
     validateConfig(config);
     return withRemoteClient(config, (client) => new sync_engine_1.SyncEngine(config).sync(client, options));
+}
+/** Publish locally changed files without a two-way scan. */
+async function uploadChangedFiles(config, options = {}) {
+    validateConfig(config);
+    return withRemoteClient(config, (client) => new sync_engine_1.SyncEngine(config).uploadChanged(client, options));
 }
 /**
  * Computes the remote path for a given local file.

@@ -272,12 +272,12 @@
         "sftpPluggin.uploadOnSave": {
           "type": "boolean",
           "default": true,
-          "description": "Synchronize current file after manual save (Ctrl+S), with conflict detection"
+          "description": "Upload all locally changed project files after manual save (Ctrl+S); local versions overwrite remote copies"
         },
         "sftpPluggin.uploadOnAutoSave": {
           "type": "boolean",
           "default": false,
-          "description": "Synchronize current file after auto-save, with conflict detection"
+          "description": "Upload all locally changed project files after auto-save or workspace file changes; local versions overwrite remote copies"
         },
         "sftpPluggin.showUploadButton": {
           "type": "boolean",

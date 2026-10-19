@@ -762,6 +762,12 @@ export async function runSync(config: SftpConfig, options: SyncOptions = {}): Pr
     return withRemoteClient(config, (client) => new SyncEngine(config).sync(client, options));
 }
 
+/** Publish locally changed files without a two-way scan. */
+export async function uploadChangedFiles(config: SftpConfig, options: SyncOptions = {}): Promise<string> {
+    validateConfig(config);
+    return withRemoteClient(config, (client) => new SyncEngine(config).uploadChanged(client, options));
+}
+
 /**
  * Computes the remote path for a given local file.
  * @param config - The SFTP configuration.

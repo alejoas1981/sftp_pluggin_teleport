@@ -145,6 +145,58 @@ export class SyncEngine {
         return result;
     }
 
+    /** Upload local changes only; never traverse or download the remote tree. */
+    async uploadChanged(client: RemoteClient, options: SyncOptions = {}): Promise<string> {
+        preparedPlan = undefined;
+        const state = new SyncState(this.config), filter = ignore().add(this.config.ignore ?? []).add(SYNC_EXCLUDES);
+        await state.load();
+        this.cache = new ScanCache(this.config.localPath!);
+        await this.cache.load();
+        const local = await this.collectLocal(filter, undefined, options),
+            candidates = [...local].filter(([file, entry]) => !entry.isDirectory && !entry.isSymbolicLink
+                && !sameLocal(entry, state.records.get(file)?.local));
+        let next = 0, completed = 0, failed = false;
+        options.onState?.({ phase: 'Uploading local changes', current: 0, total: candidates.length, percent: 0 });
+        options.onLog?.(`Local changes: ${candidates.length}; no recursive remote scan.\n`);
+        const worker = async () => {
+            while (!failed && next < candidates.length) {
+                const [file, entry] = candidates[next++];
+                try {
+                    // Check only this destination and its parents; local content is authoritative.
+                    let parent = path.posix.dirname(file);
+                    while (parent !== '.') {
+                        const target = await client.stat(path.posix.join(this.config.remotePath!, parent));
+                        if (target && (!target.isDirectory || target.isSymbolicLink)) {
+                            throw new Error(`Unsafe remote parent: ${parent}`);
+                        }
+                        parent = path.posix.dirname(parent);
+                    }
+                    const remote = await client.stat(path.posix.join(this.config.remotePath!, file));
+                    if (remote?.isDirectory || remote?.isSymbolicLink) { throw new Error(`Not a regular remote file: ${file}`); }
+                    if (!state.records.has(file) && remote && sameMetadata(entry, remote)) {
+                        state.records.set(file, { local: entry, remote });
+                    } else {
+                        options.onLog?.(`UPLOAD local to server: ${file} — started\n`);
+                        await this.execute(client, { file, action: 'upload', local: entry, remote }, state);
+                        options.onLog?.(`UPLOAD local to server: ${file} — done\n`);
+                    }
+                    completed++;
+                    options.onState?.({ file, current: completed, percent: Math.min(99, Math.floor(100 * completed / candidates.length)) });
+                } catch (error: any) {
+                    failed = true;
+                    options.onLog?.(`UPLOAD local to server: ${file} — failed: ${error.message}\n`);
+                    throw error;
+                }
+            }
+        };
+        try {
+            const results = await Promise.allSettled(Array.from({ length: Math.min(transferConcurrency(this.config.concurrency), candidates.length) }, worker)),
+                failure = results.find((result): result is PromiseRejectedResult => result.status === 'rejected');
+            if (failure) { throw failure.reason; }
+        } finally { await state.save(); await this.saveCache(options); }
+        return `UPLOAD COMPLETE\nLocal changes processed: ${completed}\nDownload: 0\nAutomatic deletion: disabled`;
+    }
+
     /** Explicit user choice resolves a conflict and records the selected pair. */
     async transferFile(client: RemoteClient, file: string, action: 'upload' | 'download'): Promise<void> {
         await this.assertLocalPath(file);

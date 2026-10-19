@@ -2,14 +2,18 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import { getConfiguration, initializeConfiguration, hasPrivateConfiguration, saveConfiguration, deleteConfiguration, getPassword, resolveMode, SftpConfig } from './config';
-import { runSync, testConnection, ensureTeleportSession, uploadFile, downloadFile, deleteRemoteFile, syncFile } from './sync';
+import { runSync, testConnection, ensureTeleportSession, uploadFile, downloadFile, deleteRemoteFile, syncFile, uploadChangedFiles } from './sync';
 import { startWatching, stopWatching } from './watcher';
 import { createStatusBar, updateSftpStatus, startLoading, stopLoading } from './status';
 import { renderProgress } from './progress';
 import { SyncTask } from './sync-task';
+import { SaveUploadQueue } from './save-upload-queue';
+import { isIgnored } from './utils';
+import { SYNC_EXCLUDES } from './sync-state';
 import { configureStorage } from './private-storage';
 
 let outputChannel: vscode.OutputChannel, extensionContext: vscode.ExtensionContext, syncInProgress = false;
+let saveUploads: SaveUploadQueue | undefined, savingBatch = false;
 const saveReasons = new Map<string, number>(), syncTask = new SyncTask();
 
 /**
@@ -47,6 +51,21 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.workspace.onWillSaveTextDocument(handleDocumentWillSave),
         vscode.workspace.onDidSaveTextDocument(handleDocumentSave)
     );
+
+    saveUploads = new SaveUploadQueue(uploadSavedChanges, () => syncInProgress,
+        (error: any) => {
+            outputChannel.appendLine(`[save upload error] ${error.message}`);
+            vscode.window.showErrorMessage(`SFTP upload failed: ${error.message}. Save again to retry.`);
+        }, () => Math.max(50, getConfiguration().debounceMs ?? 300));
+    const uploadWatcher = vscode.workspace.createFileSystemWatcher('**/*', false, false, true),
+        onDiskChange = (uri: vscode.Uri) => {
+            if (savingBatch || uri.scheme !== 'file'
+                || !vscode.workspace.getConfiguration('sftpPluggin').get<boolean>('uploadOnAutoSave', false)) { return; }
+            if (isUploadPath(getConfiguration(), uri.fsPath)) { saveUploads?.request(); }
+        };
+    uploadWatcher.onDidChange(onDiskChange);
+    uploadWatcher.onDidCreate(onDiskChange);
+    context.subscriptions.push(uploadWatcher, saveUploads);
 
     autoLogin().catch((error: any) => {
         outputChannel.appendLine(`[auto-login] ${error.message}`);
@@ -134,9 +153,13 @@ async function withActiveFile<T>(config: SftpConfig, action: (localPath: string)
     }
     const localPath = editor.document.fileName;
     validateFileInLocalPath(config, localPath);
-    await ensureTeleportIfNeeded(config);
-    const result = await action(localPath);
-    return [localPath, result];
+    if (syncInProgress) { throw new Error('SFTP sync already in progress'); }
+    syncInProgress = true;
+    try {
+        await ensureTeleportIfNeeded(config);
+        const result = await action(localPath);
+        return [localPath, result];
+    } finally { syncInProgress = false; }
 }
 
 /**
@@ -493,24 +516,44 @@ function handleDocumentSave(doc: vscode.TextDocument): void {
     if (isAuto && !uploadOnAutoSave) { return; }
     if (reason === undefined && !uploadOnSave) { return; }
 
-    const config = getConfiguration();
-    let localPath: string;
+    if (!savingBatch && isUploadPath(getConfiguration(), doc.fileName)) { saveUploads?.request(); }
+}
+
+function isUploadPath(config: SftpConfig, file: string): boolean {
     try {
-        localPath = resolveLocalRoot(config);
-    } catch {
-        return;
-    }
-    if (!doc.fileName.startsWith(localPath)) { return; }
-    if (syncInProgress) { return; }
-    startLoading();
-    runCommand(async (cfg) => {
-        if (resolveMode(cfg) === 'teleport') {
-            await ensureTeleportSession(cfg, { onLink: openTeleportLink });
-        }
-        const result = await syncFile(cfg, doc.fileName);
-        outputChannel.appendLine(`${result}: ${doc.fileName}`);
-        if (result.includes('WITH CONFLICTS')) { vscode.window.showWarningMessage(result); }
-    }).then(() => stopLoading(), () => stopLoading('$(error) SFTP: error'));
+        const relative = path.relative(resolveLocalRoot(config), file).replace(/\\/g, '/');
+        return !!relative && relative !== '..' && !relative.startsWith('../') && !path.isAbsolute(relative)
+            && !isIgnored(relative, [...(config.ignore ?? []), ...SYNC_EXCLUDES]);
+    } catch { return false; }
+}
+
+async function uploadSavedChanges(): Promise<void> {
+    const config = await loadConfig();
+    if (syncInProgress) { saveUploads?.request(); return; }
+    syncInProgress = true;
+    syncTask.start(false);
+    try {
+        // Save only existing documents in this project; never prompt for untitled files.
+        savingBatch = true;
+        try {
+            for (const document of vscode.workspace.textDocuments) {
+                if (document.isDirty && document.uri.scheme === 'file' && isUploadPath(config, document.fileName)) {
+                    if (!await document.save()) { throw new Error(`Could not save ${document.fileName}`); }
+                }
+            }
+        } finally { savingBatch = false; }
+        syncTask.log('UPLOAD: locally changed files only; no remote tree scan.\n');
+        await ensureTeleportIfNeeded(config);
+        const result = await uploadChangedFiles(config, {
+            onLog: (text) => { syncTask.log(text); outputChannel.appendLine(text.trimEnd()); },
+            onState: (state) => syncTask.update(state),
+        });
+        outputChannel.appendLine(result);
+        syncTask.finish(result);
+    } catch (error: any) {
+        syncTask.finish(error.message, true);
+        throw error;
+    } finally { syncInProgress = false; }
 }
 
 /**
@@ -518,6 +561,8 @@ function handleDocumentSave(doc: vscode.TextDocument): void {
  * @returns {void}
  */
 export function deactivate() {
+    saveUploads?.dispose();
+    saveReasons.clear();
     syncTask.dispose();
     stopWatching();
 }
