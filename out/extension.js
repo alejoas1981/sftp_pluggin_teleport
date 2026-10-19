@@ -54,6 +54,10 @@ function activate(context) {
     context.subscriptions.push(outputChannel);
     (0, status_1.createStatusBar)(context);
     const unsubscribe = syncTask.subscribe((state) => {
+        if (state.progressReset) {
+            (0, status_1.updateSftpStatus)('$(cloud) SFTP: ready', 'Ready');
+            return;
+        }
         const icon = state.status === 'running' ? 'sync~spin' : state.status === 'error' ? 'error' : state.status === 'warning' ? 'warning' : 'check', progress = state.percent === undefined ? '' : (0, progress_1.renderProgress)(state.percent) + ' ';
         (0, status_1.updateSftpStatus)(`$(${icon}) SFTP: ${progress}${state.phase}`, `${state.phase}\n${state.file}\nFiles: ${state.current}/${state.total ?? '?'} | Local: ${state.localFiles} | Remote: ${state.remoteFiles} | ${Math.floor(state.elapsedMs / 1000)}s`);
     });

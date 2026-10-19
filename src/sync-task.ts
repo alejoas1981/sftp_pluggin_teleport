@@ -24,6 +24,7 @@ export interface TaskSnapshot extends SyncProgress {
     elapsedMs: number;
     logs: string[];
     result?: string;
+    progressReset?: boolean;
 }
 
 /** Extension-owned state. Observer failure can never fail the synchronization. */
@@ -31,6 +32,10 @@ export class SyncTask {
     private state?: TaskSnapshot;
     private readonly listeners = new Set<(state: TaskSnapshot) => void>();
     private timer?: ReturnType<typeof setInterval>;
+
+    private resetTimer?: ReturnType<typeof setTimeout>;
+
+    constructor(private readonly completionDisplayMs = 1500) {}
 
     snapshot(): TaskSnapshot | undefined {
         return this.state ? { ...this.state, logs: [...this.state.logs] } : undefined;
@@ -43,6 +48,7 @@ export class SyncTask {
 
     start(dryRun: boolean): void {
         if (this.state?.status === 'running') { throw new Error('Sync already in progress'); }
+        clearTimeout(this.resetTimer);
         this.state = { id: randomUUID(), dryRun, status: 'running', startedAt: Date.now(), elapsedMs: 0,
             phase: 'Connecting', current: 0, completedBytes: 0, localFiles: 0, remoteFiles: 0,
             directories: 0, file: '', logs: [] };
@@ -70,16 +76,27 @@ export class SyncTask {
             phase: error ? this.state.phase + ' — failed' : this.state.dryRun ? 'Analysis complete' : 'Sync complete',
             percent: error ? this.state.percent : 100 });
         this.publish();
+        clearTimeout(this.resetTimer);
+        if (this.state.status === 'complete') {
+            const id = this.state.id;
+            this.resetTimer = setTimeout(() => {
+                if (this.state?.id !== id || this.state.status !== 'complete') { return; }
+                this.state.progressReset = true;
+                this.publish(false);
+            }, this.completionDisplayMs);
+            this.resetTimer.unref?.();
+        }
     }
 
     dispose(): void {
+        clearTimeout(this.resetTimer);
         clearInterval(this.timer);
         this.listeners.clear();
     }
 
-    private publish(): void {
+    private publish(updateElapsed = true): void {
         if (!this.state) { return; }
-        this.state.elapsedMs = Date.now() - this.state.startedAt;
+        if (updateElapsed) { this.state.elapsedMs = Date.now() - this.state.startedAt; }
         for (const listener of this.listeners) {
             try { listener(this.snapshot()!); }
             catch { /* A disposed observer is detached; transfer state remains owned here. */ this.listeners.delete(listener); }

@@ -71,6 +71,13 @@ function renderSyncState(state) {
     activityLines = state.logs;
     renderActivity();
     if (state.result) { setStatus(state.result, state.status === 'complete' ? 'ok' : state.status); }
+    if (state.progressReset) {
+        updateProgress(0);
+        progressBar.classList.remove('indeterminate');
+        progressPercent.textContent = '';
+        loader.style.display = 'none';
+        setStatus('', '');
+    }
 }
 
 function setSyncRunning(running) {

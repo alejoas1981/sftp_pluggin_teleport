@@ -30,6 +30,10 @@ export function activate(context: vscode.ExtensionContext) {
 
     createStatusBar(context);
     const unsubscribe = syncTask.subscribe((state) => {
+        if (state.progressReset) {
+            updateSftpStatus('$(cloud) SFTP: ready', 'Ready');
+            return;
+        }
         const icon = state.status === 'running' ? 'sync~spin' : state.status === 'error' ? 'error' : state.status === 'warning' ? 'warning' : 'check',
             progress = state.percent === undefined ? '' : renderProgress(state.percent) + ' ';
         updateSftpStatus(`$(${icon}) SFTP: ${progress}${state.phase}`, `${state.phase}\n${state.file}\nFiles: ${state.current}/${state.total ?? '?'} | Local: ${state.localFiles} | Remote: ${state.remoteFiles} | ${Math.floor(state.elapsedMs / 1000)}s`);
