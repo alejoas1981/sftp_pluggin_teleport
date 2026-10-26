@@ -238,7 +238,7 @@
         "sftpPluggin.concurrency": {
           "type": "integer",
           "default": 4,
-          "description": "Parallel file transfers: 1 for sequential, 2\u201316 for simultaneous transfers (separate connections for FTP/FTPS)",
+          "description": "Parallel file transfers: 1 for sequential, 2–16 for simultaneous transfers (separate connections for FTP/FTPS)",
           "minimum": 1,
           "maximum": 16
         },
@@ -250,7 +250,7 @@
         "sftpPluggin.ftpSecure": {
           "type": "boolean",
           "default": false,
-          "description": "Use FTPS (TLS) \u2014 encrypted FTP connection; enable if the server requires AUTH TLS"
+          "description": "Use FTPS (TLS) — encrypted FTP connection; enable if the server requires AUTH TLS"
         },
         "sftpPluggin.identity": {
           "type": "string",
@@ -318,11 +318,12 @@
     }
   },
   "scripts": {
-    "vscode:prepublish": "npm run compile",
+    "vscode:prepublish": "npm run bundle",
     "compile": "tsc -p ./",
+    "bundle": "npm run compile && node scripts/bundle.cjs",
     "watch": "tsc -watch -p ./",
     "test": "mocha --require ts-node/register --require src/test/setup.js 'src/test/**/*.test.ts'",
-    "build:extension": "mkdir -p build && vsce package --dependencies -o build/"
+    "build:extension": "mkdir -p build && vsce package --no-dependencies -o build/"
   },
   "devDependencies": {
     "@types/chai": "4.3.11",
@@ -334,6 +335,7 @@
     "@types/vscode": "1.80.0",
     "@vscode/vsce": "2.24.0",
     "chai": "4.4.1",
+    "esbuild": "^0.25.12",
     "mocha": "10.4.0",
     "proxyquire": "^2.1.3",
     "ts-node": "10.9.2",

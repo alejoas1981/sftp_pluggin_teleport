@@ -14,7 +14,8 @@ import { SYNC_EXCLUDES } from './sync-state';
 import { configureStorage } from './private-storage';
 
 let outputChannel: vscode.OutputChannel, extensionContext: vscode.ExtensionContext, syncInProgress = false;
-let saveUploads: SaveUploadQueue | undefined, savingBatch = false;
+let saveUploads: SaveUploadQueue | undefined, savingBatch = false,
+    uploadBatchInProgress = false, uploadRestartPending = false;
 const pendingUploads = new Map<string, number>();
 let changeSequence = 0;
 const saveReasons = new Map<string, number>(), syncTask = new SyncTask();
@@ -70,16 +71,22 @@ export function activate(context: vscode.ExtensionContext) {
             outputChannel.appendLine(`[save upload error] ${error.message}`);
             vscode.window.showErrorMessage(`SFTP upload failed: ${error.message}. Save again to retry.`);
         }, () => Math.max(50, getConfiguration().debounceMs ?? 300));
-    const uploadWatcher = vscode.workspace.createFileSystemWatcher('**/*', false, false, true),
+    const uploadWatcher = vscode.workspace.createFileSystemWatcher('**/*', false, false, false),
         onDiskChange = (uri: vscode.Uri) => {
             if (uri.scheme !== 'file' || !isUploadPath(getConfiguration(), uri.fsPath)) { return; }
             pendingUploads.set(uri.fsPath, ++changeSequence);
-            if (!savingBatch && vscode.workspace.getConfiguration('sftpPluggin').get<boolean>('uploadOnAutoSave', false)) {
-                saveUploads?.request();
+            if (!savingBatch) {
+                const autoUpload = vscode.workspace.getConfiguration('sftpPluggin').get<boolean>('uploadOnAutoSave', false);
+                if (uploadBatchInProgress) {
+                    uploadRestartPending = true;
+                    cancelActiveTransfer();
+                }
+                if (autoUpload) { saveUploads?.request(); }
             }
         };
     uploadWatcher.onDidChange(onDiskChange);
     uploadWatcher.onDidCreate(onDiskChange);
+    uploadWatcher.onDidDelete(onDiskChange);
     context.subscriptions.push(uploadWatcher, saveUploads);
 
     autoLogin().catch((error: any) => {
@@ -560,10 +567,27 @@ function isUploadPath(config: SftpConfig, file: string): boolean {
     } catch { return false; }
 }
 
+/**
+ * Checks whether a failed upload became obsolete because local files changed again.
+ * @param error - Upload failure raised after the local working tree changed.
+ * @returns True when the latest queued snapshot should replace the failed transfer.
+ */
+function isSupersededUploadError(error: unknown): boolean {
+    const message = error instanceof Error ? error.message : String(error);
+    return message.includes('Transfer cancelled') || message.includes('File changed during transfer')
+        || message.includes('File changed after scanning');
+}
+
+/**
+ * Uploads the queued local snapshot and restarts cleanly when the working tree changes mid-transfer.
+ * @returns {Promise<void>} Resolves after the current snapshot finishes or is superseded.
+ */
 async function uploadSavedChanges(): Promise<void> {
     const config = await loadConfig();
     if (syncInProgress) { saveUploads?.request(); return; }
     syncInProgress = true;
+    uploadBatchInProgress = true;
+    uploadRestartPending = false;
     syncTask.start(false);
     try {
         // Save only existing documents in this project; never prompt for untitled files.
@@ -590,9 +614,22 @@ async function uploadSavedChanges(): Promise<void> {
         outputChannel.appendLine(result);
         syncTask.finish(result);
     } catch (error: any) {
+        if (uploadRestartPending && isSupersededUploadError(error)) {
+            const autoUpload = vscode.workspace.getConfiguration('sftpPluggin').get<boolean>('uploadOnAutoSave', false),
+                message = autoUpload ? 'Local files changed during transfer; restarting with the latest version.'
+                    : 'Local files changed during transfer; transfer cancelled. Save again to upload the latest version.';
+            syncTask.log(message + '\n');
+            outputChannel.appendLine(`[save-upload] ${message}`);
+            syncTask.finish(message, false, true);
+            return;
+        }
         syncTask.finish(error.message, true);
         throw error;
-    } finally { syncInProgress = false; }
+    } finally {
+        syncInProgress = false;
+        uploadBatchInProgress = false;
+        uploadRestartPending = false;
+    }
 }
 
 /**

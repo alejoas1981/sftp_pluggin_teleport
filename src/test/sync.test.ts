@@ -87,6 +87,23 @@ describe('two-way sync', () => {
         expect(remote.deletes).to.have.length(0);
     });
 
+    it('reports independent upload and download wall-clock durations', async () => {
+        writeLocal('local.txt', 'local');
+        remote.files.set('/remote/server.txt', { content: 'server', time: 1700000000000 });
+        const originalPut = remote.put.bind(remote), originalGet = remote.get.bind(remote), updates: any[] = [];
+        remote.put = async (local, target) => {
+            await new Promise((resolve) => setTimeout(resolve, 10));
+            await originalPut(local, target);
+        };
+        remote.get = async (source, local) => {
+            await new Promise((resolve) => setTimeout(resolve, 10));
+            await originalGet(source, local);
+        };
+        await new SyncEngine(config()).sync(remote, { onState: (state) => updates.push(state) });
+        expect(Math.max(...updates.map((state) => state.uploadMs ?? 0))).to.be.greaterThanOrEqual(8);
+        expect(Math.max(...updates.map((state) => state.downloadMs ?? 0))).to.be.greaterThanOrEqual(8);
+    });
+
     it('selects newer versions in either direction on the first run, even with different sizes', async () => {
         writeLocal('pull.txt', 'old', 1600000000000);
         writeLocal('push.txt', 'new local', 1800000000000);

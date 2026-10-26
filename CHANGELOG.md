@@ -6,10 +6,13 @@
 
 - Save-triggered Teleport uploads batch multiple changed files into one rsync session instead of opening one session per file.
 - Teleport rsync uses `--ignore-times` after the plugin identifies changed files. This preserves rsync's delta-transfer algorithm without the extra full-file reads caused by `--checksum`.
+- Automatic uploads cancel an obsolete transfer after a branch switch, pull, save, or external file update and restart from the debounced latest snapshot.
+- The extension runtime and dependencies are bundled into one JavaScript entry point, reducing VSIX file count and install size.
 
 ### Added
 
 - The configuration panel shows **Cancel Transfer** while synchronization is active. Cancelling aborts the active Teleport, SFTP, or FTP transport.
+- Progress and final results report upload, download, and complete session durations in milliseconds.
 
 ## 3.2.0
 

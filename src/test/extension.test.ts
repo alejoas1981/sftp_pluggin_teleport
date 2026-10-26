@@ -209,6 +209,34 @@ describe('extension', () => {
         expect(syncCalls.filter((call) => call === 'uploadChanged')).to.have.length(2);
     });
 
+    it('cancels and restarts an obsolete automatic upload after a working-tree update', async () => {
+        (vscode as any)._values.uploadOnAutoSave = true;
+        const batches: string[][] = [];
+        let rejectTransfer: ((error: Error) => void) | undefined;
+        syncMock.uploadChangedFiles = async (_config: any, options: any) => {
+            batches.push(options.files);
+            if (batches.length === 1) {
+                await new Promise<never>((_resolve, reject) => { rejectTransfer = reject; });
+            }
+            return 'UPLOAD COMPLETE';
+        };
+        syncMock.cancelActiveTransfer = () => {
+            syncCalls.push('cancelActiveTransfer');
+            rejectTransfer?.(new Error('Transfer cancelled'));
+            return true;
+        };
+        ext.activate(context);
+        save(path.join(tempDir, 'before-pull.txt'), 1);
+        await new Promise((resolve) => setTimeout(resolve, 80));
+        (vscode as any)._watchers[0]._trigger('didChange', vscode.Uri.file(path.join(tempDir, 'after-pull.txt')));
+        await new Promise((resolve) => setTimeout(resolve, 180));
+        expect(syncCalls.filter((call) => call === 'cancelActiveTransfer')).to.have.length(1);
+        expect(batches).to.have.length(2);
+        expect(batches[1]).to.include('after-pull.txt');
+        const output = (vscode as any)._outputChannels[0];
+        expect(output.lines.some((line: string) => line.includes('restarting with the latest version'))).to.equal(true);
+    });
+
     it('uploads external filesystem edits when auto-save uploads are enabled', async () => {
         (vscode as any)._values.uploadOnAutoSave = true;
         ext.activate(context);

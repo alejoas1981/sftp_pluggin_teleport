@@ -53,7 +53,9 @@ Downloads are staged locally so an interrupted transfer does not truncate the cu
 
 Teleport follows the same planner and uses rsync without `--delete`. Save-triggered uploads batch changed files into one rsync session and use rsync's delta-transfer algorithm. It requires local `tsh` and `rsync`, remote `rsync`, and GNU `find`/`stat`. Extra Rsync Flags accepts `--bwlimit=N`, `--exclude PATTERN`, and `--exclude=PATTERN`, including quoted patterns. Legacy exclusions are merged with Ignore patterns before local scanning and planning; only the bandwidth flag is passed to rsync. Unsupported flags fail before connecting.
 
-## Synchronization progress and parallel transfers (3.2.0)
+## Synchronization progress and parallel transfers (3.2.1)
+
+The progress panel reports upload time, download time, and complete session time. Final results retain all three values in milliseconds so performance can be compared between releases and environments.
 
 ### Five synchronization fixes
 
@@ -108,7 +110,7 @@ Use a test copy of a project with nested and empty directories, many small files
 9. Complete a second synchronization, then repeat the full workflow with a large directory tree.
 10. Compare concurrency `1` and `4` using server transfer logs. Repeat with FTP, explicit FTPS/passive settings, and SFTP. Verify the three log colors in the selected VS Code theme.
 
-## Faster scans and private storage (3.2.0)
+## Faster scans and private storage (3.2.1)
 
 The first analysis reads local file contents to compute SHA-256 hashes. Subsequent analyses reuse hashes when size, nanosecond modification/change times, inode and device identity match. Cached hashes expire after 24 hours. Enable **Verify all local file contents** for a complete content check. The panel shows reused/read counters; the log records local and remote scan durations. The cache is an optimization, separate from the successful synchronization history used for conflict detection. A corrupt cache is rebuilt.
 
@@ -280,14 +282,16 @@ npm test
 
 The suite covers configuration, two-way synchronization, conflict detection, Ignore rules, partial downloads, prepared-plan reuse and invalidation, progress, Webview restoration and disposal, bounded logs, FTP/FTPS connection concurrency, SFTP/Teleport adapters, and the watcher. A 1200-file import from a prepared plan and a subsequent sync are exercised with local files and a model remote server.
 
-The 3.2.0 final-fix verification passed **114 tests**. Network and VS Code APIs are mocked in these tests: passing them does not certify a live server, a TLS handshake, or the real VS Code Webview lifecycle. The manual checks below remain necessary before release.
+The 3.2.1 automated suite covers the behavior described above. Network and VS Code APIs are mocked in these tests: passing them does not certify a live server, a TLS handshake, or the real VS Code Webview lifecycle. The manual checks below remain necessary before release.
 
 ```bash
 npm run compile
 npm run build:extension
 ```
 
-The package is generated as `build/sftp-pluggin-3.2.0.vsix`; these fixes do not change the version.
+The package is generated as `build/sftp-pluggin-3.2.1.vsix`.
+
+The release build bundles the extension runtime and JavaScript dependencies into `out/extension.js`. Source files, tests, development dependencies, and build-only files are excluded from the VSIX.
 
 ## Notes on the Teleport session
 
@@ -303,7 +307,9 @@ A Teleport session is valid for about 10 hours. The extension checks the session
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) and [LICENSE](LICENSE).
 
-## Upload all local changes on save (3.2.0)
+## Upload all local changes on save (3.2.1)
+
+If a branch switch, pull, save, or external tool changes the working tree during an automatic upload, the obsolete transport is cancelled and the debounced queue restarts from the latest local snapshot. This expected restart is shown as a warning rather than a transfer failure. When automatic upload is disabled, the stale transfer is cancelled and the latest paths remain queued until the next manual save.
 
 With `sftpPluggin.uploadOnSave: true`, a manual save queues an upload of all locally changed files under the configured local path, including edits made to other files by an IDE or external tool. With `sftpPluggin.uploadOnAutoSave: true`, automatic document saves and file creation/change events inside the open workspace trigger the same queue. Files outside the open workspace are not watched automatically; a document-save event or saving a dirty open document is needed to queue them. Neither option runs a full remote directory scan. The separate Start Watching command retains its two-way synchronization behavior.
 

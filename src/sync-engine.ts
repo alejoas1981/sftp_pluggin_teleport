@@ -31,6 +31,53 @@ interface PlannedFile {
     reason?: string;
 }
 
+type TransferDirection = 'upload' | 'download';
+
+interface TransferDurations {
+    uploadMs: number;
+    downloadMs: number;
+}
+
+/** Measures wall-clock time per direction without double-counting parallel transfers. */
+class TransferTimer {
+    private readonly active = { upload: 0, download: 0 };
+    private readonly startedAt: Partial<Record<TransferDirection, number>> = {};
+    private readonly elapsed = { upload: 0, download: 0 };
+
+    /**
+     * Starts measuring one transfer and returns an idempotent completion callback.
+     * @param direction - Transfer direction to measure.
+     * @returns Callback that stops this transfer and returns accumulated durations.
+     */
+    start(direction: TransferDirection): () => TransferDurations {
+        if (this.active[direction]++ === 0) { this.startedAt[direction] = Date.now(); }
+        let stopped = false;
+        return () => {
+            if (!stopped) {
+                stopped = true;
+                this.active[direction]--;
+                if (this.active[direction] === 0) {
+                    this.elapsed[direction] += Date.now() - this.startedAt[direction]!;
+                    delete this.startedAt[direction];
+                }
+            }
+            return this.snapshot();
+        };
+    }
+
+    /**
+     * Returns the accumulated transfer durations.
+     * @returns Upload and download wall-clock milliseconds.
+     */
+    snapshot(): TransferDurations {
+        const now = Date.now();
+        return {
+            uploadMs: this.elapsed.upload + (this.active.upload ? now - this.startedAt.upload! : 0),
+            downloadMs: this.elapsed.download + (this.active.download ? now - this.startedAt.download! : 0)
+        };
+    }
+}
+
 function sameLocal(left: Fingerprint | undefined, right: Fingerprint | undefined): boolean {
     return !left || !right ? left === right : left.hash === right.hash && left.size === right.size;
 }
@@ -79,6 +126,7 @@ export class SyncEngine {
         }
         const conflicts = plan.filter((item) => item.action === 'conflict'),
             changes = plan.filter((item) => !['conflict', 'unchanged'].includes(item.action)),
+            transferTimer = new TransferTimer(),
             report = [
                 `Upload: ${plan.filter((item) => item.action === 'upload').length}`,
                 `Download: ${plan.filter((item) => item.action === 'download').length}`,
@@ -101,10 +149,13 @@ export class SyncEngine {
         let completed = 0, completedFiles = 0, completedBytes = 0;
         const totalFiles = changes.filter((item) => item.action === 'download' || item.action === 'upload').length,
             totalBytes = changes.reduce((sum, item) => sum + (item.action === 'download' ? item.remote!.size : item.action === 'upload' ? item.local!.size : 0), 0);
-        options.onState?.({ phase: 'Transferring files', current: 0, total: totalFiles, completedBytes: 0, totalBytes, percent: 0 });
+        options.onState?.({ phase: 'Transferring files', current: 0, total: totalFiles, completedBytes: 0,
+            totalBytes, percent: 0, ...transferTimer.snapshot() });
         const perform = async (item: PlannedFile) => {
             options.onState?.({ file: item.file });
             options.onLog?.(`${describe(item)} — started\n`);
+            const stopTiming = item.action === 'upload' || item.action === 'download'
+                ? transferTimer.start(item.action) : undefined;
             try {
                 await this.execute(client, item, state);
                 completed += 1;
@@ -117,6 +168,8 @@ export class SyncEngine {
             } catch (error: any) {
                 options.onLog?.(`${describe(item)} — failed: ${error.message}\n`);
                 throw error;
+            } finally {
+                if (stopTiming) { options.onState?.(stopTiming()); }
             }
         };
         try {
@@ -158,7 +211,9 @@ export class SyncEngine {
                 && (options.files ? options.files.includes(file) : state.records.has(file))
                 && !sameLocal(entry, state.records.get(file)?.local));
         let next = 0, completed = 0, failed = false;
-        options.onState?.({ phase: 'Uploading local changes', current: 0, total: candidates.length, percent: 0 });
+        const transferTimer = new TransferTimer();
+        options.onState?.({ phase: 'Uploading local changes', current: 0, total: candidates.length,
+            percent: 0, ...transferTimer.snapshot() });
         options.onLog?.(`Local changes: ${candidates.length}; no recursive remote scan.\n`);
         if (client.putMany && candidates.length > 1) {
             try {
@@ -194,10 +249,13 @@ export class SyncEngine {
                     items.push(item);
                     options.onLog?.(`UPLOAD local to server: ${file} — started\n`);
                 }
-                await client.putMany(items.map((item) => ({
-                    localPath: path.join(this.config.localPath!, item.file),
-                    remotePath: path.posix.join(this.config.remotePath!, item.file)
-                })));
+                const stopTiming = transferTimer.start('upload');
+                try {
+                    await client.putMany(items.map((item) => ({
+                        localPath: path.join(this.config.localPath!, item.file),
+                        remotePath: path.posix.join(this.config.remotePath!, item.file)
+                    })));
+                } finally { options.onState?.(stopTiming()); }
                 const uploadedPaths = items.map((item) => path.posix.join(remoteRoot, item.file)),
                     uploadedStats = client.statMany ? await client.statMany(uploadedPaths)
                         : new Map(await Promise.all(uploadedPaths.map(async (remotePath) => [remotePath, await client.stat(remotePath)] as const)));
@@ -241,7 +299,9 @@ export class SyncEngine {
                     const remote = await client.stat(path.posix.join(this.config.remotePath!, file));
                     if (remote?.isDirectory || remote?.isSymbolicLink) { throw new Error(`Not a regular remote file: ${file}`); }
                     options.onLog?.(`UPLOAD local to server: ${file} — started\n`);
-                    await this.execute(client, { file, action: 'upload', local: entry, remote }, state);
+                    const stopTiming = transferTimer.start('upload');
+                    try { await this.execute(client, { file, action: 'upload', local: entry, remote }, state); }
+                    finally { options.onState?.(stopTiming()); }
                     options.onLog?.(`UPLOAD local to server: ${file} — done\n`);
                     completed++;
                     options.onState?.({ file, current: completed, percent: Math.min(99, Math.floor(100 * completed / candidates.length)) });

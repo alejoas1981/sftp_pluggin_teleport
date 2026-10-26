@@ -33,6 +33,21 @@ describe('extension-owned synchronization state', () => {
         expect(updates[1].percent).to.equal(undefined);
         task.finish('DRY RUN'); task.dispose();
     });
+
+    it('retains session, upload, and download timings in the final result', async () => {
+        const task = new SyncTask();
+        task.start(false);
+        task.update({ uploadMs: 125, downloadMs: 75 });
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        task.finish('SYNC COMPLETE');
+        const snapshot = task.snapshot()!;
+        const log = snapshot.logs.join('');
+        expect(log).to.include('Session time:');
+        expect(log).to.include('Upload time: 125 ms');
+        expect(log).to.include('Download time: 75 ms');
+        expect(snapshot.elapsedMs).to.be.greaterThan(0);
+        task.dispose();
+    });
     it('resets successful progress after a short delay while preserving logs and result', async () => {
         const task = new SyncTask(20), updates: any[] = [];
         task.subscribe((state) => updates.push(state));

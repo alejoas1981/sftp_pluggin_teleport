@@ -1,9 +1,18 @@
 .vscode/**
 src/**
 !src/webview/**
-out/test/**
+out/**
+!out/extension.js
+node_modules/**
 **/*.map
 
 build/**
+test/**
+scripts/**
+tsconfig.json
+.gitignore
+PLAN.md
+sample-config.json
+sftp_teleport.ico
 
 .sftp-sync/**

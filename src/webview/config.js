@@ -53,6 +53,15 @@ function appendActivity(text) {
     renderActivity();
 }
 
+/**
+ * Formats a millisecond duration for compact progress display.
+ * @param {number} milliseconds Duration in milliseconds.
+ * @returns {string} Duration with millisecond or second precision.
+ */
+function formatDuration(milliseconds) {
+    return milliseconds < 1000 ? `${milliseconds} ms` : `${(milliseconds / 1000).toFixed(2)} s`;
+}
+
 function renderSyncState(state) {
     if (!state) { return; }
     clearInterval(progressInterval);
@@ -68,7 +77,8 @@ function renderSyncState(state) {
     progressPercent.textContent = `${state.phase} | ${state.percent === undefined ? 'Working…' : state.percent + '%'} | `
         + `Files: ${state.current}/${state.total ?? '?'} | Local: ${state.localFiles} | Remote: ${state.remoteFiles} | `
         + `Directories: ${state.directories} | Hash cache: ${state.cachedFiles ?? 0} reused / ${state.hashedFiles ?? 0} read | Completed file bytes: ${state.completedBytes}/${state.totalBytes ?? '?'} | `
-        + `${Math.floor(state.elapsedMs / 1000)}s | ${state.file}`;
+        + `Upload: ${formatDuration(state.uploadMs ?? 0)} | Download: ${formatDuration(state.downloadMs ?? 0)} | `
+        + `Session: ${formatDuration(state.elapsedMs)} | ${state.file}`;
     activityLines = state.logs;
     renderActivity();
     if (state.result) { setStatus(state.result, state.status === 'complete' ? 'ok' : state.status); }

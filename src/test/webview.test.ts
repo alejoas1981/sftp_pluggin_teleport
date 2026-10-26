@@ -208,10 +208,13 @@ describe('webview config panel', () => {
     it('restores real progress and colored logs, then requests fresh state on focus', () => {
         const state = { id: 'task', status: 'running', phase: 'Transferring files', percent: 45,
             current: 9, total: 20, completedBytes: 90, totalBytes: 200, localFiles: 0, remoteFiles: 20,
-            directories: 3, elapsedMs: 2000, file: 'x.txt',
+            directories: 3, uploadMs: 125, downloadMs: 75, elapsedMs: 2000, file: 'x.txt',
             logs: ['DOWNLOAD x.txt — started\n', 'DOWNLOAD y.txt — done\n'] };
         windowStub.postMessageToListeners({ data: { command: 'syncState', state } });
         expect(elements['progress-percent'].textContent).to.include('45%');
+        expect(elements['progress-percent'].textContent).to.include('Upload: 125 ms');
+        expect(elements['progress-percent'].textContent).to.include('Download: 75 ms');
+        expect(elements['progress-percent'].textContent).to.include('Session: 2.00 s');
         expect(elements['sync-now'].disabled).to.equal(true);
         expect(elements['activity-log'].children.map((line) => line.className)).to.deep.equal(['log-started', 'log-done']);
         (windowListeners.focus || []).forEach((listener) => listener());

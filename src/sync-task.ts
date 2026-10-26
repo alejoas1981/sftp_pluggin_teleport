@@ -11,6 +11,10 @@ export interface SyncProgress {
     localFiles: number;
     remoteFiles: number;
     directories: number;
+    /** Wall-clock milliseconds spent in active upload operations. */
+    uploadMs: number;
+    /** Wall-clock milliseconds spent in active download operations. */
+    downloadMs: number;
     file: string;
     percent?: number;
     planId?: string;
@@ -51,7 +55,7 @@ export class SyncTask {
         clearTimeout(this.resetTimer);
         this.state = { id: randomUUID(), dryRun, status: 'running', startedAt: Date.now(), elapsedMs: 0,
             phase: 'Connecting', current: 0, completedBytes: 0, localFiles: 0, remoteFiles: 0,
-            directories: 0, file: '', logs: [] };
+            directories: 0, uploadMs: 0, downloadMs: 0, file: '', logs: [] };
         this.publish();
         this.timer = setInterval(() => this.publish(), 250);
         this.timer.unref?.();
@@ -67,13 +71,24 @@ export class SyncTask {
         if (this.state.logs.length > 500) { this.state.logs.shift(); }
     }
 
-    finish(result: string, error = false): void {
+    /**
+     * Completes the active task and appends stable timing metrics to its log.
+     * @param result - Human-readable operation result.
+     * @param error - Whether the operation failed.
+     * @param warning - Whether the operation completed with a recoverable warning.
+     * @returns {void}
+     */
+    finish(result: string, error = false, warning = false): void {
         if (!this.state) { return; }
         clearInterval(this.timer);
         this.timer = undefined;
-        this.log(result + '\n');
-        Object.assign(this.state, { result, status: error ? 'error' : result.includes('WITH CONFLICTS') ? 'warning' : 'complete',
-            phase: error ? this.state.phase + ' — failed' : this.state.dryRun ? 'Analysis complete' : 'Sync complete',
+        this.state.elapsedMs = Date.now() - this.state.startedAt;
+        const timedResult = `${result}\nSession time: ${this.state.elapsedMs} ms\nUpload time: ${this.state.uploadMs} ms\nDownload time: ${this.state.downloadMs} ms`;
+        this.log(timedResult + '\n');
+        Object.assign(this.state, { result,
+            status: error ? 'error' : warning || result.includes('WITH CONFLICTS') ? 'warning' : 'complete',
+            phase: error ? this.state.phase + ' — failed' : warning ? 'Restarting upload'
+                : this.state.dryRun ? 'Analysis complete' : 'Sync complete',
             percent: error ? this.state.percent : 100 });
         this.publish();
         clearTimeout(this.resetTimer);
