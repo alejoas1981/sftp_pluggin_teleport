@@ -205,6 +205,16 @@ describe('webview config panel', () => {
         expect(elements['cancel-transfer'].hidden).to.equal(true);
     });
 
+    it('shows pending instead of zero transfer time while scanning', () => {
+        const state = { id: 'scan', status: 'running', phase: 'Scanning remote files',
+            current: 0, completedBytes: 0, localFiles: 34577, remoteFiles: 34209,
+            directories: 7013, uploadMs: 0, downloadMs: 0, elapsedMs: 5960260,
+            file: 'includes/example.php', logs: [] };
+        windowStub.postMessageToListeners({ data: { command: 'syncState', state } });
+        expect(elements['progress-percent'].textContent).to.include('Upload: pending');
+        expect(elements['progress-percent'].textContent).to.include('Download: pending');
+    });
+
     it('restores real progress and colored logs, then requests fresh state on focus', () => {
         const state = { id: 'task', status: 'running', phase: 'Transferring files', percent: 45,
             current: 9, total: 20, completedBytes: 90, totalBytes: 200, localFiles: 0, remoteFiles: 20,

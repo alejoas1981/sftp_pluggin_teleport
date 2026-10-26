@@ -15,6 +15,8 @@ export interface SyncProgress {
     uploadMs: number;
     /** Wall-clock milliseconds spent in active download operations. */
     downloadMs: number;
+    uploadActive?: boolean;
+    downloadActive?: boolean;
     file: string;
     percent?: number;
     planId?: string;
@@ -38,6 +40,7 @@ export class SyncTask {
     private timer?: ReturnType<typeof setInterval>;
 
     private resetTimer?: ReturnType<typeof setTimeout>;
+    private timingUpdatedAt = 0;
 
     constructor(private readonly completionDisplayMs = 1500) {}
 
@@ -55,14 +58,19 @@ export class SyncTask {
         clearTimeout(this.resetTimer);
         this.state = { id: randomUUID(), dryRun, status: 'running', startedAt: Date.now(), elapsedMs: 0,
             phase: 'Connecting', current: 0, completedBytes: 0, localFiles: 0, remoteFiles: 0,
-            directories: 0, uploadMs: 0, downloadMs: 0, file: '', logs: [] };
+            directories: 0, uploadMs: 0, downloadMs: 0, uploadActive: false, downloadActive: false,
+            file: '', logs: [] };
+        this.timingUpdatedAt = this.state.startedAt;
         this.publish();
         this.timer = setInterval(() => this.publish(), 250);
         this.timer.unref?.();
     }
 
     update(progress: Partial<SyncProgress>): void {
-        if (this.state) { Object.assign(this.state, progress); }
+        if (this.state) {
+            this.advanceTransferTimings();
+            Object.assign(this.state, progress);
+        }
     }
 
     log(text: string): void {
@@ -82,6 +90,7 @@ export class SyncTask {
         if (!this.state) { return; }
         clearInterval(this.timer);
         this.timer = undefined;
+        this.advanceTransferTimings();
         this.state.elapsedMs = Date.now() - this.state.startedAt;
         const timedResult = `${result}\nSession time: ${this.state.elapsedMs} ms\nUpload time: ${this.state.uploadMs} ms\nDownload time: ${this.state.downloadMs} ms`;
         this.log(timedResult + '\n');
@@ -111,10 +120,20 @@ export class SyncTask {
 
     private publish(updateElapsed = true): void {
         if (!this.state) { return; }
+        this.advanceTransferTimings();
         if (updateElapsed) { this.state.elapsedMs = Date.now() - this.state.startedAt; }
         for (const listener of this.listeners) {
             try { listener(this.snapshot()!); }
             catch { /* A disposed observer is detached; transfer state remains owned here. */ this.listeners.delete(listener); }
         }
+    }
+
+    /** Advances live direction timers since the previous state update. */
+    private advanceTransferTimings(): void {
+        if (!this.state) { return; }
+        const now = Date.now(), elapsed = Math.max(0, now - this.timingUpdatedAt);
+        if (this.state.uploadActive) { this.state.uploadMs += elapsed; }
+        if (this.state.downloadActive) { this.state.downloadMs += elapsed; }
+        this.timingUpdatedAt = now;
     }
 }

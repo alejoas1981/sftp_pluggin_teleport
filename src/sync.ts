@@ -66,6 +66,8 @@ export interface RemoteItem {
 export interface RemoteClient {
     test(): Promise<void>;
     list(remoteDir: string): Promise<RemoteItem[]>;
+    /** Returns a complete tree keyed by paths relative to the requested directory. */
+    listTree?(remoteDir: string): Promise<Map<string, RemoteItem>>;
     stat(remotePath: string): Promise<RemoteItem | undefined>;
     statMany?(remotePaths: string[]): Promise<Map<string, RemoteItem | undefined>>;
     put(localPath: string, remotePath: string): Promise<void>;
@@ -683,6 +685,36 @@ class TeleportClient implements RemoteClient {
     }
 
     /**
+     * Reads the complete remote tree through one Teleport command.
+     * @param remoteDir - Remote root directory to traverse.
+     * @returns Map keyed by paths relative to the requested root.
+     */
+    async listTree(remoteDir: string): Promise<Map<string, RemoteItem>> {
+        const dir = escapeShell(normalizeRemotePath(remoteDir)),
+            output = await runTshCommand(this.config,
+                `LC_ALL=C find ${dir} -mindepth 1 -printf '%P\\0%s\\0%T@\\0%y\\0'`, true, this.signal),
+            fields = output.split('\0'),
+            items = new Map<string, RemoteItem>();
+        for (let index = 0; index + 3 < fields.length; index += 4) {
+            const [relative, size, mtime, type] = fields.slice(index, index + 4);
+            if (!relative) { continue; }
+            const normalized = path.posix.normalize(relative);
+            if (normalized !== relative || relative.startsWith('/') || /[\\\0]/.test(relative)
+                || relative.split('/').some((part) => !part || part === '.' || part === '..')) {
+                throw new Error(`Unsafe remote path: ${JSON.stringify(relative)}`);
+            }
+            items.set(relative, {
+                name: path.posix.basename(relative),
+                size: parseInt(size, 10) || 0,
+                modifyTime: Math.floor(parseFloat(mtime) * 1000) || 0,
+                isDirectory: type === 'd',
+                isSymbolicLink: type !== 'd' && type !== 'f'
+            });
+        }
+        return items;
+    }
+
+    /**
      * Uploads a local file to the remote host via rsync over tsh.
      * @param localPath - The local file path.
      * @param remotePath - The remote destination path.
@@ -704,13 +736,14 @@ class TeleportClient implements RemoteClient {
                     || relativeRemote !== relativeLocal) {
                     throw new Error(`Unsafe Teleport upload path: ${relativeLocal || localPath}`);
                 }
-                return relativeLocal.split('/').join(path.sep);
+                return relativeLocal;
             }),
             destinationRoot = remoteRoot === '/' ? '/' : `${remoteRoot}/`,
             remoteSpec = `${this.config.sftpUser}@${this.config.sftpHost}:${escapeShell(destinationRoot)}`;
-        await spawnCommand('rsync', [...args, '--relative', '--', ...sources, remoteSpec], {
+        await spawnCommand('rsync', [...args, '--relative', '--from0', '--files-from=-', './', remoteSpec], {
             env: process.env,
             cwd: localRoot,
+            input: Buffer.from(`${sources.join('\0')}\0`),
             signal: this.signal
         });
     }
@@ -1054,11 +1087,13 @@ export function validateConfig(config: SftpConfig): void {
 function spawnCommand(
     command: string,
     args: string[],
-    options: { env?: NodeJS.ProcessEnv; cwd?: string; rawOutput?: boolean; onOutput?: (text: string) => void; signal?: AbortSignal }
+    options: { env?: NodeJS.ProcessEnv; cwd?: string; rawOutput?: boolean; onOutput?: (text: string) => void;
+        signal?: AbortSignal; input?: string | Buffer }
 ): Promise<string> {
     return new Promise<string>((resolve, reject) => {
         const child = cp.spawn(command, args, { env: options.env, cwd: options.cwd, signal: options.signal });
         let stdout = '', stderr = '';
+        if (options.input !== undefined) { child.stdin?.end(options.input); }
         child.stdout.on('data', (data) => { const text = data.toString(); stdout += text; options.onOutput?.(text); });
         child.stderr.on('data', (data) => { const text = data.toString(); stderr += text; options.onOutput?.(text); });
         child.on('error', (error: any) => {
@@ -1074,7 +1109,9 @@ function spawnCommand(
         });
         child.on('close', (code) => {
             if (code !== 0) {
-                const message = stderr.trim() || stdout.trim() || `command exited with code ${code}`;
+                const rawMessage = stderr.trim() || stdout.trim() || `command exited with code ${code}`,
+                    detail = rawMessage.replace(/\u001B\[[0-?]*[ -/]*[@-~]/g, ''),
+                    message = code === 255 ? `Teleport/SSH connection closed (status 255): ${detail}` : detail;
                 reject(new Error(message));
                 return;
             }

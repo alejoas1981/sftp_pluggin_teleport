@@ -48,6 +48,18 @@ describe('extension-owned synchronization state', () => {
         expect(snapshot.elapsedMs).to.be.greaterThan(0);
         task.dispose();
     });
+
+    it('advances an active transfer timer before the file completes', async () => {
+        const task = new SyncTask();
+        task.start(false);
+        task.update({ uploadActive: true });
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        task.update({ uploadActive: false });
+        expect(task.snapshot()!.uploadMs).to.be.greaterThanOrEqual(15);
+        expect(task.snapshot()!.downloadMs).to.equal(0);
+        task.finish('UPLOAD COMPLETE');
+        task.dispose();
+    });
     it('resets successful progress after a short delay while preserving logs and result', async () => {
         const task = new SyncTask(20), updates: any[] = [];
         task.subscribe((state) => updates.push(state));

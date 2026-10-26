@@ -36,6 +36,8 @@ type TransferDirection = 'upload' | 'download';
 interface TransferDurations {
     uploadMs: number;
     downloadMs: number;
+    uploadActive: boolean;
+    downloadActive: boolean;
 }
 
 /** Measures wall-clock time per direction without double-counting parallel transfers. */
@@ -73,7 +75,9 @@ class TransferTimer {
         const now = Date.now();
         return {
             uploadMs: this.elapsed.upload + (this.active.upload ? now - this.startedAt.upload! : 0),
-            downloadMs: this.elapsed.download + (this.active.download ? now - this.startedAt.download! : 0)
+            downloadMs: this.elapsed.download + (this.active.download ? now - this.startedAt.download! : 0),
+            uploadActive: this.active.upload > 0,
+            downloadActive: this.active.download > 0
         };
     }
 }
@@ -117,9 +121,9 @@ export class SyncEngine {
             const started = Date.now(), local = await this.collectLocal(filter, options.files, options),
                 localFinished = Date.now();
             options.onLog?.(`Local scan: ${this.cache.hits} cached, ${this.cache.hashed} hashed; ${localFinished - started} ms.\n`);
+            await this.saveCache(options);
             const remote = await this.collectRemote(client, filter, options.files, options);
             options.onLog?.(`Remote scan: ${remote.size} entries; ${Date.now() - localFinished} ms.\n`);
-            await this.saveCache(options);
             options.onState?.({ phase: 'Comparing files' });
             plan = this.buildPlan(local, remote, state).filter((item) => !options.files || options.files.some((file) => file === item.file
                 || (item.action === 'conflict' && file.startsWith(`${item.file}/`))));
@@ -156,6 +160,7 @@ export class SyncEngine {
             options.onLog?.(`${describe(item)} — started\n`);
             const stopTiming = item.action === 'upload' || item.action === 'download'
                 ? transferTimer.start(item.action) : undefined;
+            if (stopTiming) { options.onState?.(transferTimer.snapshot()); }
             try {
                 await this.execute(client, item, state);
                 completed += 1;
@@ -250,6 +255,7 @@ export class SyncEngine {
                     options.onLog?.(`UPLOAD local to server: ${file} — started\n`);
                 }
                 const stopTiming = transferTimer.start('upload');
+                options.onState?.(transferTimer.snapshot());
                 try {
                     await client.putMany(items.map((item) => ({
                         localPath: path.join(this.config.localPath!, item.file),
@@ -300,6 +306,7 @@ export class SyncEngine {
                     if (remote?.isDirectory || remote?.isSymbolicLink) { throw new Error(`Not a regular remote file: ${file}`); }
                     options.onLog?.(`UPLOAD local to server: ${file} — started\n`);
                     const stopTiming = transferTimer.start('upload');
+                    options.onState?.(transferTimer.snapshot());
                     try { await this.execute(client, { file, action: 'upload', local: entry, remote }, state); }
                     finally { options.onState?.(stopTiming()); }
                     options.onLog?.(`UPLOAD local to server: ${file} — done\n`);
@@ -365,7 +372,20 @@ export class SyncEngine {
 
     private async collectRemote(client: RemoteClient, filter: ReturnType<typeof ignore>, selected?: string[], options: SyncOptions = {}): Promise<Map<string, Entry>> {
         let directories = 0, files = 0;
-        const entries = new Map<string, Entry>(), pending = [''], concurrency = transferConcurrency(this.config.scanConcurrency),
+        const entries = new Map<string, Entry>();
+        if (client.listTree && !selected) {
+            options.onState?.({ phase: 'Scanning remote files', remoteFiles: 0, directories: 0, file: '.' });
+            const tree = await client.listTree(this.config.remotePath!);
+            for (const [file, item] of tree) {
+                if (filter.ignores(file)) { continue; }
+                if (item.isDirectory) { directories++; }
+                else { files++; }
+                entries.set(file, item);
+            }
+            options.onState?.({ phase: 'Scanning remote files', remoteFiles: files, directories, file: '.' });
+            return entries;
+        }
+        const pending = [''], concurrency = transferConcurrency(this.config.scanConcurrency),
             visit = async (relative: string) => {
                 options.onState?.({ phase: 'Scanning remote files', file: relative || '.' });
                 const items = await client.list(path.posix.join(this.config.remotePath!, relative));
@@ -439,36 +459,45 @@ export class SyncEngine {
         }
     }
 
+    /** Validates a prepared plan, reusing one remote tree snapshot when the transport supports it. */
     private async validatePreparedPlan(client: RemoteClient, plan: PlannedFile[], options: SyncOptions): Promise<void> {
-        const concurrency = transferConcurrency(this.config.scanConcurrency);
+        const concurrency = transferConcurrency(this.config.scanConcurrency),
+            remoteSnapshot = client.listTree ? await client.listTree(this.config.remotePath!) : undefined;
         for (let offset = 0; offset < plan.length; offset += concurrency) {
             const results = await Promise.allSettled(plan.slice(offset, offset + concurrency).map(async (item) => {
                 options.onState?.({ file: item.file });
                 if (item.action === 'conflict') { return; }
-                if (item.local?.isDirectory || item.remote?.isDirectory) { await this.assertDirectoryUnchanged(client, item); }
-                else { await this.assertUnchanged(client, item, true); }
+                if (item.local?.isDirectory || item.remote?.isDirectory) {
+                    await this.assertDirectoryUnchanged(client, item, remoteSnapshot);
+                } else { await this.assertUnchanged(client, item, true, remoteSnapshot); }
             })), failure = results.find((result): result is PromiseRejectedResult => result.status === 'rejected');
             if (failure) { throw failure.reason; }
             options.onState?.({ cachedFiles: this.cache!.hits, hashedFiles: this.cache!.hashed });
         }
     }
 
-    private async assertUnchanged(client: RemoteClient, item: PlannedFile, useCache = false): Promise<void> {
+    /** Verifies a file against its planned local and remote metadata. */
+    private async assertUnchanged(client: RemoteClient, item: PlannedFile, useCache = false,
+        remoteSnapshot?: Map<string, RemoteItem>): Promise<void> {
         await this.assertLocalPath(item.file);
         const local = useCache ? await this.cache!.fingerprint(item.file, this.config.verifyContents)
                 : await fingerprintLocal(path.join(this.config.localPath!, item.file)),
-            remote = await client.stat(path.posix.join(this.config.remotePath!, item.file));
+            remote = remoteSnapshot ? remoteSnapshot.get(item.file)
+                : await client.stat(path.posix.join(this.config.remotePath!, item.file));
         if (!sameLocal(local, item.local) || !sameMetadata(remote, item.remote) || remote?.isDirectory || remote?.isSymbolicLink) {
             throw new Error(`File changed after scanning; run sync again: ${item.file}`);
         }
     }
 
-    private async assertDirectoryUnchanged(client: RemoteClient, item: PlannedFile): Promise<void> {
+    /** Verifies a directory against its planned local and remote presence. */
+    private async assertDirectoryUnchanged(client: RemoteClient, item: PlannedFile,
+        remoteSnapshot?: Map<string, RemoteItem>): Promise<void> {
         await this.assertLocalPath(item.file);
         let local: fs.Stats | undefined;
         try { local = await fs.promises.lstat(path.join(this.config.localPath!, item.file)); }
         catch (error: any) { if (error.code !== 'ENOENT') { throw error; } }
-        const remote = await client.stat(path.posix.join(this.config.remotePath!, item.file));
+        const remote = remoteSnapshot ? remoteSnapshot.get(item.file)
+            : await client.stat(path.posix.join(this.config.remotePath!, item.file));
         if (!!local !== !!item.local || !!remote !== !!item.remote
             || (local && (!local.isDirectory() || local.isSymbolicLink()))
             || (remote && (!remote.isDirectory || remote.isSymbolicLink))) {

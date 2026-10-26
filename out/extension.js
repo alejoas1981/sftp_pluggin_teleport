@@ -26855,7 +26855,9 @@ var TransferTimer = class {
     const now = Date.now();
     return {
       uploadMs: this.elapsed.upload + (this.active.upload ? now - this.startedAt.upload : 0),
-      downloadMs: this.elapsed.download + (this.active.download ? now - this.startedAt.download : 0)
+      downloadMs: this.elapsed.download + (this.active.download ? now - this.startedAt.download : 0),
+      uploadActive: this.active.upload > 0,
+      downloadActive: this.active.download > 0
     };
   }
 };
@@ -26901,10 +26903,10 @@ var SyncEngine = class {
       const started = Date.now(), local = await this.collectLocal(filter, options.files, options), localFinished = Date.now();
       (_e2 = options.onLog) == null ? void 0 : _e2.call(options, `Local scan: ${this.cache.hits} cached, ${this.cache.hashed} hashed; ${localFinished - started} ms.
 `);
+      await this.saveCache(options);
       const remote = await this.collectRemote(client, filter, options.files, options);
       (_f = options.onLog) == null ? void 0 : _f.call(options, `Remote scan: ${remote.size} entries; ${Date.now() - localFinished} ms.
 `);
-      await this.saveCache(options);
       (_g = options.onState) == null ? void 0 : _g.call(options, { phase: "Comparing files" });
       plan = this.buildPlan(local, remote, state).filter((item) => !options.files || options.files.some((file) => file === item.file || item.action === "conflict" && file.startsWith(`${item.file}/`)));
     }
@@ -26945,11 +26947,14 @@ ${report}`;
       ...transferTimer.snapshot()
     });
     const perform = async (item) => {
-      var _a2, _b2, _c2, _d2, _e3, _f2, _g2;
+      var _a2, _b2, _c2, _d2, _e3, _f2, _g2, _h2;
       (_a2 = options.onState) == null ? void 0 : _a2.call(options, { file: item.file });
       (_b2 = options.onLog) == null ? void 0 : _b2.call(options, `${describe(item)} \u2014 started
 `);
       const stopTiming = item.action === "upload" || item.action === "download" ? transferTimer.start(item.action) : void 0;
+      if (stopTiming) {
+        (_c2 = options.onState) == null ? void 0 : _c2.call(options, transferTimer.snapshot());
+      }
       try {
         await this.execute(client, item, state);
         completed += 1;
@@ -26957,7 +26962,7 @@ ${report}`;
           completedFiles++;
         }
         completedBytes += item.action === "download" ? item.remote.size : item.action === "upload" ? item.local.size : 0;
-        (_c2 = options.onState) == null ? void 0 : _c2.call(options, {
+        (_d2 = options.onState) == null ? void 0 : _d2.call(options, {
           current: completedFiles,
           total: totalFiles,
           completedBytes,
@@ -26965,16 +26970,16 @@ ${report}`;
           percent: Math.min(99, Math.floor(100 * (totalBytes ? completedBytes / totalBytes : completed / changes.length))),
           file: item.file
         });
-        (_d2 = options.onProgress) == null ? void 0 : _d2.call(options, completed, changes.length, item.file, item.action);
-        (_e3 = options.onLog) == null ? void 0 : _e3.call(options, `${describe(item)} \u2014 done
+        (_e3 = options.onProgress) == null ? void 0 : _e3.call(options, completed, changes.length, item.file, item.action);
+        (_f2 = options.onLog) == null ? void 0 : _f2.call(options, `${describe(item)} \u2014 done
 `);
       } catch (error) {
-        (_f2 = options.onLog) == null ? void 0 : _f2.call(options, `${describe(item)} \u2014 failed: ${error.message}
+        (_g2 = options.onLog) == null ? void 0 : _g2.call(options, `${describe(item)} \u2014 failed: ${error.message}
 `);
         throw error;
       } finally {
         if (stopTiming) {
-          (_g2 = options.onState) == null ? void 0 : _g2.call(options, stopTiming());
+          (_h2 = options.onState) == null ? void 0 : _h2.call(options, stopTiming());
         }
       }
     };
@@ -27016,7 +27021,7 @@ Resolve each conflict with Upload Active File or Download Active File after choo
   }
   /** Upload local changes only; never traverse or download the remote tree. */
   async uploadChanged(client, options = {}) {
-    var _a, _b, _c, _d, _e2, _f, _g, _h;
+    var _a, _b, _c, _d, _e2, _f, _g, _h, _i2;
     preparedPlan = void 0;
     const state = new SyncState(this.config), filter = (0, import_ignore2.default)().add(this.config.ignore ?? []).add(SYNC_EXCLUDES);
     await state.load();
@@ -27073,13 +27078,14 @@ Resolve each conflict with Upload Active File or Download Active File after choo
 `);
         }
         const stopTiming = transferTimer.start("upload");
+        (_d = options.onState) == null ? void 0 : _d.call(options, transferTimer.snapshot());
         try {
           await client.putMany(items.map((item) => ({
             localPath: path6.join(this.config.localPath, item.file),
             remotePath: path6.posix.join(this.config.remotePath, item.file)
           })));
         } finally {
-          (_d = options.onState) == null ? void 0 : _d.call(options, stopTiming());
+          (_e2 = options.onState) == null ? void 0 : _e2.call(options, stopTiming());
         }
         const uploadedPaths = items.map((item) => path6.posix.join(remoteRoot, item.file)), uploadedStats = client.statMany ? await client.statMany(uploadedPaths) : new Map(await Promise.all(uploadedPaths.map(async (remotePath) => [remotePath, await client.stat(remotePath)])));
         for (const item of items) {
@@ -27087,22 +27093,22 @@ Resolve each conflict with Upload Active File or Download Active File after choo
           if (!afterLocal || !afterRemote || afterRemote.isDirectory || afterRemote.size !== afterLocal.size || !sameLocal(afterLocal, item.local)) {
             throw new Error(`File changed during transfer; sync history was not updated: ${item.file}`);
           }
-          (_e2 = this.cache) == null ? void 0 : _e2.remember(item.file, afterLocal);
+          (_f = this.cache) == null ? void 0 : _f.remember(item.file, afterLocal);
           state.records.set(item.file, {
             local: afterLocal,
             remote: { size: afterRemote.size, modifyTime: afterRemote.modifyTime }
           });
           completed++;
-          (_f = options.onLog) == null ? void 0 : _f.call(options, `UPLOAD local to server: ${item.file} \u2014 done
+          (_g = options.onLog) == null ? void 0 : _g.call(options, `UPLOAD local to server: ${item.file} \u2014 done
 `);
-          (_g = options.onState) == null ? void 0 : _g.call(options, {
+          (_h = options.onState) == null ? void 0 : _h.call(options, {
             file: item.file,
             current: completed,
             percent: Math.min(99, Math.floor(100 * completed / candidates.length))
           });
         }
       } catch (error) {
-        (_h = options.onLog) == null ? void 0 : _h.call(options, `UPLOAD batch \u2014 failed: ${error.message}
+        (_i2 = options.onLog) == null ? void 0 : _i2.call(options, `UPLOAD batch \u2014 failed: ${error.message}
 `);
         throw error;
       } finally {
@@ -27115,7 +27121,7 @@ Download: 0
 Automatic deletion: disabled`;
     }
     const worker = async () => {
-      var _a2, _b2, _c2, _d2, _e3;
+      var _a2, _b2, _c2, _d2, _e3, _f2;
       while (!failed && next < candidates.length) {
         const [file, entry] = candidates[next++];
         try {
@@ -27134,18 +27140,19 @@ Automatic deletion: disabled`;
           (_a2 = options.onLog) == null ? void 0 : _a2.call(options, `UPLOAD local to server: ${file} \u2014 started
 `);
           const stopTiming = transferTimer.start("upload");
+          (_b2 = options.onState) == null ? void 0 : _b2.call(options, transferTimer.snapshot());
           try {
             await this.execute(client, { file, action: "upload", local: entry, remote }, state);
           } finally {
-            (_b2 = options.onState) == null ? void 0 : _b2.call(options, stopTiming());
+            (_c2 = options.onState) == null ? void 0 : _c2.call(options, stopTiming());
           }
-          (_c2 = options.onLog) == null ? void 0 : _c2.call(options, `UPLOAD local to server: ${file} \u2014 done
+          (_d2 = options.onLog) == null ? void 0 : _d2.call(options, `UPLOAD local to server: ${file} \u2014 done
 `);
           completed++;
-          (_d2 = options.onState) == null ? void 0 : _d2.call(options, { file, current: completed, percent: Math.min(99, Math.floor(100 * completed / candidates.length)) });
+          (_e3 = options.onState) == null ? void 0 : _e3.call(options, { file, current: completed, percent: Math.min(99, Math.floor(100 * completed / candidates.length)) });
         } catch (error) {
           failed = true;
-          (_e3 = options.onLog) == null ? void 0 : _e3.call(options, `UPLOAD local to server: ${file} \u2014 failed: ${error.message}
+          (_f2 = options.onLog) == null ? void 0 : _f2.call(options, `UPLOAD local to server: ${file} \u2014 failed: ${error.message}
 `);
           throw error;
         }
@@ -27223,10 +27230,29 @@ Automatic deletion: disabled`;
     }
   }
   async collectRemote(client, filter, selected, options = {}) {
+    var _a, _b;
     let directories = 0, files = 0;
-    const entries = /* @__PURE__ */ new Map(), pending = [""], concurrency = transferConcurrency(this.config.scanConcurrency), visit = async (relative5) => {
-      var _a, _b;
-      (_a = options.onState) == null ? void 0 : _a.call(options, { phase: "Scanning remote files", file: relative5 || "." });
+    const entries = /* @__PURE__ */ new Map();
+    if (client.listTree && !selected) {
+      (_a = options.onState) == null ? void 0 : _a.call(options, { phase: "Scanning remote files", remoteFiles: 0, directories: 0, file: "." });
+      const tree = await client.listTree(this.config.remotePath);
+      for (const [file, item] of tree) {
+        if (filter.ignores(file)) {
+          continue;
+        }
+        if (item.isDirectory) {
+          directories++;
+        } else {
+          files++;
+        }
+        entries.set(file, item);
+      }
+      (_b = options.onState) == null ? void 0 : _b.call(options, { phase: "Scanning remote files", remoteFiles: files, directories, file: "." });
+      return entries;
+    }
+    const pending = [""], concurrency = transferConcurrency(this.config.scanConcurrency), visit = async (relative5) => {
+      var _a2, _b2;
+      (_a2 = options.onState) == null ? void 0 : _a2.call(options, { phase: "Scanning remote files", file: relative5 || "." });
       const items = await client.list(path6.posix.join(this.config.remotePath, relative5));
       for (const item of items) {
         if (item.name === "." || item.name === "..") {
@@ -27247,7 +27273,7 @@ Automatic deletion: disabled`;
           pending.push(file);
         }
       }
-      (_b = options.onState) == null ? void 0 : _b.call(options, { directories: ++directories, remoteFiles: files, file: relative5 || "." });
+      (_b2 = options.onState) == null ? void 0 : _b2.call(options, { directories: ++directories, remoteFiles: files, file: relative5 || "." });
     };
     while (pending.length) {
       const results = await Promise.allSettled(pending.splice(0, concurrency).map(visit)), failure = results.find((result) => result.status === "rejected");
@@ -27305,9 +27331,10 @@ Automatic deletion: disabled`;
       }
     }
   }
+  /** Validates a prepared plan, reusing one remote tree snapshot when the transport supports it. */
   async validatePreparedPlan(client, plan, options) {
     var _a;
-    const concurrency = transferConcurrency(this.config.scanConcurrency);
+    const concurrency = transferConcurrency(this.config.scanConcurrency), remoteSnapshot = client.listTree ? await client.listTree(this.config.remotePath) : void 0;
     for (let offset = 0; offset < plan.length; offset += concurrency) {
       const results = await Promise.allSettled(plan.slice(offset, offset + concurrency).map(async (item) => {
         var _a2, _b, _c;
@@ -27316,9 +27343,9 @@ Automatic deletion: disabled`;
           return;
         }
         if (((_b = item.local) == null ? void 0 : _b.isDirectory) || ((_c = item.remote) == null ? void 0 : _c.isDirectory)) {
-          await this.assertDirectoryUnchanged(client, item);
+          await this.assertDirectoryUnchanged(client, item, remoteSnapshot);
         } else {
-          await this.assertUnchanged(client, item, true);
+          await this.assertUnchanged(client, item, true, remoteSnapshot);
         }
       })), failure = results.find((result) => result.status === "rejected");
       if (failure) {
@@ -27327,14 +27354,16 @@ Automatic deletion: disabled`;
       (_a = options.onState) == null ? void 0 : _a.call(options, { cachedFiles: this.cache.hits, hashedFiles: this.cache.hashed });
     }
   }
-  async assertUnchanged(client, item, useCache = false) {
+  /** Verifies a file against its planned local and remote metadata. */
+  async assertUnchanged(client, item, useCache = false, remoteSnapshot) {
     await this.assertLocalPath(item.file);
-    const local = useCache ? await this.cache.fingerprint(item.file, this.config.verifyContents) : await fingerprintLocal(path6.join(this.config.localPath, item.file)), remote = await client.stat(path6.posix.join(this.config.remotePath, item.file));
+    const local = useCache ? await this.cache.fingerprint(item.file, this.config.verifyContents) : await fingerprintLocal(path6.join(this.config.localPath, item.file)), remote = remoteSnapshot ? remoteSnapshot.get(item.file) : await client.stat(path6.posix.join(this.config.remotePath, item.file));
     if (!sameLocal(local, item.local) || !sameMetadata(remote, item.remote) || (remote == null ? void 0 : remote.isDirectory) || (remote == null ? void 0 : remote.isSymbolicLink)) {
       throw new Error(`File changed after scanning; run sync again: ${item.file}`);
     }
   }
-  async assertDirectoryUnchanged(client, item) {
+  /** Verifies a directory against its planned local and remote presence. */
+  async assertDirectoryUnchanged(client, item, remoteSnapshot) {
     await this.assertLocalPath(item.file);
     let local;
     try {
@@ -27344,7 +27373,7 @@ Automatic deletion: disabled`;
         throw error;
       }
     }
-    const remote = await client.stat(path6.posix.join(this.config.remotePath, item.file));
+    const remote = remoteSnapshot ? remoteSnapshot.get(item.file) : await client.stat(path6.posix.join(this.config.remotePath, item.file));
     if (!!local !== !!item.local || !!remote !== !!item.remote || local && (!local.isDirectory() || local.isSymbolicLink()) || remote && (!remote.isDirectory || remote.isSymbolicLink)) {
       throw new Error(`Directory changed after scanning; run Dry Run again: ${item.file}`);
     }
@@ -27969,6 +27998,37 @@ var TeleportClient = class {
     return items;
   }
   /**
+   * Reads the complete remote tree through one Teleport command.
+   * @param remoteDir - Remote root directory to traverse.
+   * @returns Map keyed by paths relative to the requested root.
+   */
+  async listTree(remoteDir) {
+    const dir = escapeShell(normalizeRemotePath(remoteDir)), output = await runTshCommand(
+      this.config,
+      `LC_ALL=C find ${dir} -mindepth 1 -printf '%P\\0%s\\0%T@\\0%y\\0'`,
+      true,
+      this.signal
+    ), fields = output.split("\0"), items = /* @__PURE__ */ new Map();
+    for (let index = 0; index + 3 < fields.length; index += 4) {
+      const [relative5, size, mtime, type] = fields.slice(index, index + 4);
+      if (!relative5) {
+        continue;
+      }
+      const normalized = path7.posix.normalize(relative5);
+      if (normalized !== relative5 || relative5.startsWith("/") || /[\\\0]/.test(relative5) || relative5.split("/").some((part) => !part || part === "." || part === "..")) {
+        throw new Error(`Unsafe remote path: ${JSON.stringify(relative5)}`);
+      }
+      items.set(relative5, {
+        name: path7.posix.basename(relative5),
+        size: parseInt(size, 10) || 0,
+        modifyTime: Math.floor(parseFloat(mtime) * 1e3) || 0,
+        isDirectory: type === "d",
+        isSymbolicLink: type !== "d" && type !== "f"
+      });
+    }
+    return items;
+  }
+  /**
    * Uploads a local file to the remote host via rsync over tsh.
    * @param localPath - The local file path.
    * @param remotePath - The remote destination path.
@@ -27986,11 +28046,12 @@ var TeleportClient = class {
       if (!relativeLocal || relativeLocal.startsWith("../") || path7.isAbsolute(relativeLocal) || relativeRemote !== relativeLocal) {
         throw new Error(`Unsafe Teleport upload path: ${relativeLocal || localPath}`);
       }
-      return relativeLocal.split("/").join(path7.sep);
+      return relativeLocal;
     }), destinationRoot = remoteRoot === "/" ? "/" : `${remoteRoot}/`, remoteSpec = `${this.config.sftpUser}@${this.config.sftpHost}:${escapeShell(destinationRoot)}`;
-    await spawnCommand("rsync", [...args, "--relative", "--", ...sources, remoteSpec], {
+    await spawnCommand("rsync", [...args, "--relative", "--from0", "--files-from=-", "./", remoteSpec], {
       env: process.env,
       cwd: localRoot,
+      input: Buffer.from(`${sources.join("\0")}\0`),
       signal: this.signal
     });
   }
@@ -28246,19 +28307,23 @@ function validateConfig(config) {
 }
 function spawnCommand(command, args, options) {
   return new Promise((resolve3, reject) => {
+    var _a;
     const child = cp2.spawn(command, args, { env: options.env, cwd: options.cwd, signal: options.signal });
     let stdout = "", stderr = "";
+    if (options.input !== void 0) {
+      (_a = child.stdin) == null ? void 0 : _a.end(options.input);
+    }
     child.stdout.on("data", (data) => {
-      var _a;
+      var _a2;
       const text = data.toString();
       stdout += text;
-      (_a = options.onOutput) == null ? void 0 : _a.call(options, text);
+      (_a2 = options.onOutput) == null ? void 0 : _a2.call(options, text);
     });
     child.stderr.on("data", (data) => {
-      var _a;
+      var _a2;
       const text = data.toString();
       stderr += text;
-      (_a = options.onOutput) == null ? void 0 : _a.call(options, text);
+      (_a2 = options.onOutput) == null ? void 0 : _a2.call(options, text);
     });
     child.on("error", (error) => {
       if ((error == null ? void 0 : error.name) === "AbortError") {
@@ -28273,7 +28338,7 @@ function spawnCommand(command, args, options) {
     });
     child.on("close", (code) => {
       if (code !== 0) {
-        const message = stderr.trim() || stdout.trim() || `command exited with code ${code}`;
+        const rawMessage = stderr.trim() || stdout.trim() || `command exited with code ${code}`, detail = rawMessage.replace(/\u001B\[[0-?]*[ -/]*[@-~]/g, ""), message = code === 255 ? `Teleport/SSH connection closed (status 255): ${detail}` : detail;
         reject(new Error(message));
         return;
       }
@@ -28391,6 +28456,7 @@ var SyncTask = class {
   constructor(completionDisplayMs = 1500) {
     this.completionDisplayMs = completionDisplayMs;
     this.listeners = /* @__PURE__ */ new Set();
+    this.timingUpdatedAt = 0;
   }
   snapshot() {
     return this.state ? { ...this.state, logs: [...this.state.logs] } : void 0;
@@ -28419,15 +28485,19 @@ var SyncTask = class {
       directories: 0,
       uploadMs: 0,
       downloadMs: 0,
+      uploadActive: false,
+      downloadActive: false,
       file: "",
       logs: []
     };
+    this.timingUpdatedAt = this.state.startedAt;
     this.publish();
     this.timer = setInterval(() => this.publish(), 250);
     (_c = (_b = this.timer).unref) == null ? void 0 : _c.call(_b);
   }
   update(progress) {
     if (this.state) {
+      this.advanceTransferTimings();
       Object.assign(this.state, progress);
     }
   }
@@ -28454,6 +28524,7 @@ var SyncTask = class {
     }
     clearInterval(this.timer);
     this.timer = void 0;
+    this.advanceTransferTimings();
     this.state.elapsedMs = Date.now() - this.state.startedAt;
     const timedResult = `${result}
 Session time: ${this.state.elapsedMs} ms
@@ -28490,6 +28561,7 @@ Download time: ${this.state.downloadMs} ms`;
     if (!this.state) {
       return;
     }
+    this.advanceTransferTimings();
     if (updateElapsed) {
       this.state.elapsedMs = Date.now() - this.state.startedAt;
     }
@@ -28500,6 +28572,20 @@ Download time: ${this.state.downloadMs} ms`;
         this.listeners.delete(listener);
       }
     }
+  }
+  /** Advances live direction timers since the previous state update. */
+  advanceTransferTimings() {
+    if (!this.state) {
+      return;
+    }
+    const now = Date.now(), elapsed = Math.max(0, now - this.timingUpdatedAt);
+    if (this.state.uploadActive) {
+      this.state.uploadMs += elapsed;
+    }
+    if (this.state.downloadActive) {
+      this.state.downloadMs += elapsed;
+    }
+    this.timingUpdatedAt = now;
   }
 };
 
@@ -29017,7 +29103,7 @@ function isUploadPath(config, file) {
 }
 function isSupersededUploadError(error) {
   const message = error instanceof Error ? error.message : String(error);
-  return message.includes("Transfer cancelled") || message.includes("File changed during transfer") || message.includes("File changed after scanning");
+  return message.includes("Transfer cancelled") || message.includes("File changed during transfer") || message.includes("File changed after scanning") || message.includes("status 255");
 }
 async function uploadSavedChanges() {
   const config = await loadConfig();

@@ -51,11 +51,11 @@ When both copies changed, the log lists a conflict and neither copy is overwritt
 
 Downloads are staged locally so an interrupted transfer does not truncate the current file. Dry Run writes neither project files nor sync history. Watching responds to local filesystem events; use Sync Now to fetch server changes when no local event occurs.
 
-Teleport follows the same planner and uses rsync without `--delete`. Save-triggered uploads batch changed files into one rsync session and use rsync's delta-transfer algorithm. It requires local `tsh` and `rsync`, remote `rsync`, and GNU `find`/`stat`. Extra Rsync Flags accepts `--bwlimit=N`, `--exclude PATTERN`, and `--exclude=PATTERN`, including quoted patterns. Legacy exclusions are merged with Ignore patterns before local scanning and planning; only the bandwidth flag is passed to rsync. Unsupported flags fail before connecting.
+Teleport follows the same planner and uses rsync without `--delete`. Full synchronization reads the complete remote tree through one recursive `tsh ssh` command. Save-triggered uploads pass a null-delimited file list to one rsync session, so large branch updates do not create thousands of command arguments. Rsync's delta-transfer algorithm sends changed blocks. The mode requires local `tsh` and `rsync`, remote `rsync`, and GNU `find`/`stat`. Extra Rsync Flags accepts `--bwlimit=N`, `--exclude PATTERN`, and `--exclude=PATTERN`, including quoted patterns. Legacy exclusions are merged with Ignore patterns before local scanning and planning; only the bandwidth flag is passed to rsync. Unsupported flags fail before connecting.
 
 ## Synchronization progress and parallel transfers (3.2.1)
 
-The progress panel reports upload time, download time, and complete session time. Final results retain all three values in milliseconds so performance can be compared between releases and environments.
+The progress panel reports upload time, download time, and complete session time. Upload and download show `pending` while analysis is running, then advance live during active transfers. Final results retain all three values in milliseconds so performance can be compared between releases and environments.
 
 ### Five synchronization fixes
 

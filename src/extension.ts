@@ -575,7 +575,7 @@ function isUploadPath(config: SftpConfig, file: string): boolean {
 function isSupersededUploadError(error: unknown): boolean {
     const message = error instanceof Error ? error.message : String(error);
     return message.includes('Transfer cancelled') || message.includes('File changed during transfer')
-        || message.includes('File changed after scanning');
+        || message.includes('File changed after scanning') || message.includes('status 255');
 }
 
 /**

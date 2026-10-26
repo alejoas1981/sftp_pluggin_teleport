@@ -62,6 +62,18 @@ function formatDuration(milliseconds) {
     return milliseconds < 1000 ? `${milliseconds} ms` : `${(milliseconds / 1000).toFixed(2)} s`;
 }
 
+/**
+ * Formats a transfer timer without presenting an unstarted phase as a zero-duration result.
+ * @param {number} milliseconds Accumulated transfer duration.
+ * @param {boolean} active Whether this direction is currently transferring.
+ * @param {boolean} pending Whether the synchronization has not reached transfer work yet.
+ * @returns {string} Human-readable timer state.
+ */
+function formatTransferDuration(milliseconds, active, pending) {
+    if (pending && milliseconds === 0) { return 'pending'; }
+    return `${formatDuration(milliseconds)}${active ? '…' : ''}`;
+}
+
 function renderSyncState(state) {
     if (!state) { return; }
     clearInterval(progressInterval);
@@ -74,10 +86,13 @@ function renderSyncState(state) {
     if (!progressBar.children.length) { createProgressBlocks(); }
     updateProgress(state.percent ?? 0);
     progressBar.classList.toggle('indeterminate', state.percent === undefined && syncRunning);
+    const transferPending = state.status === 'running' && ['Connecting', 'Scanning local files', 'Scanning remote files',
+        'Comparing files', 'Validating prepared plan'].includes(state.phase);
     progressPercent.textContent = `${state.phase} | ${state.percent === undefined ? 'Working…' : state.percent + '%'} | `
         + `Files: ${state.current}/${state.total ?? '?'} | Local: ${state.localFiles} | Remote: ${state.remoteFiles} | `
         + `Directories: ${state.directories} | Hash cache: ${state.cachedFiles ?? 0} reused / ${state.hashedFiles ?? 0} read | Completed file bytes: ${state.completedBytes}/${state.totalBytes ?? '?'} | `
-        + `Upload: ${formatDuration(state.uploadMs ?? 0)} | Download: ${formatDuration(state.downloadMs ?? 0)} | `
+        + `Upload: ${formatTransferDuration(state.uploadMs ?? 0, state.uploadActive ?? false, transferPending)} | `
+        + `Download: ${formatTransferDuration(state.downloadMs ?? 0, state.downloadActive ?? false, transferPending)} | `
         + `Session: ${formatDuration(state.elapsedMs)} | ${state.file}`;
     activityLines = state.logs;
     renderActivity();

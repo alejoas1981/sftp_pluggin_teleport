@@ -8,11 +8,15 @@
 - Teleport rsync uses `--ignore-times` after the plugin identifies changed files. This preserves rsync's delta-transfer algorithm without the extra full-file reads caused by `--checksum`.
 - Automatic uploads cancel an obsolete transfer after a branch switch, pull, save, or external file update and restart from the debounced latest snapshot.
 - The extension runtime and dependencies are bundled into one JavaScript entry point, reducing VSIX file count and install size.
+- Full Teleport synchronization reads the remote tree with one recursive command instead of opening one SSH session per directory.
+- Large upload batches use a null-delimited rsync file list over stdin, avoiding command-length failures after branch switches.
+- Local hash cache results are persisted before remote scanning so cancelling a slow server scan does not discard completed local work.
 
 ### Added
 
 - The configuration panel shows **Cancel Transfer** while synchronization is active. Cancelling aborts the active Teleport, SFTP, or FTP transport.
 - Progress and final results report upload, download, and complete session durations in milliseconds.
+- Active transfer timers now advance while a file is in flight; transfer phases display as pending during scanning instead of reporting a misleading zero.
 
 ## 3.2.0
 

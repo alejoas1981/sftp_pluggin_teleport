@@ -22,11 +22,14 @@ describe('Teleport compatibility with private cache and concurrent scanning', ()
         configureStorage(storage);
         remote.clear(); directories.clear(); directories.add('/remote'); calls.length = 0;
         loggedIn = true; failTransfer = false; activeListings = 0; peakListings = 0;
-        const spawn = (command: string, args: string[], options: { cwd?: string } = {}) => {
+        const spawn = (command: string, args: string[], options: { cwd?: string; input?: string | Buffer } = {}) => {
             const child: any = new EventEmitter();
+            let stdin = Buffer.alloc(0);
             child.stdout = new EventEmitter(); child.stderr = new EventEmitter();
+            child.stdin = { end: (value: string | Buffer) => { stdin = Buffer.from(value); } };
             calls.push({ command, args });
-            const operation = args[args.length - 1], listing = command === 'tsh' && operation.startsWith('find ');
+            const operation = args[args.length - 1], listing = command === 'tsh' && operation.includes('find '),
+                recursiveListing = listing && !operation.includes('-maxdepth 1');
             if (listing) { activeListings++; peakListings = Math.max(peakListings, activeListings); }
             setTimeout(() => {
                 let output = '', failure = '';
@@ -34,10 +37,13 @@ describe('Teleport compatibility with private cache and concurrent scanning', ()
                     if (args[0] === 'status') { output = loggedIn ? 'Logged in' : 'not logged in'; }
                     else if (args[0] === 'login') { loggedIn = true; output = 'https://proxy.example.test/login'; }
                     else if (listing) {
-                        const directory = operation.match(/^find '([^']+)'/)![1];
+                        const directory = operation.match(/find '([^']+)'/)![1];
                         for (const file of [...directories, ...remote.keys()]) {
-                            if (file !== directory && path.posix.dirname(file) === directory) {
-                                output += [path.posix.basename(file), Buffer.byteLength(remote.get(file) ?? ''), '1700000000', directories.has(file) ? 'd' : 'f'].join('\0') + '\0';
+                            const relative = path.posix.relative(directory, file);
+                            if (file !== directory && !relative.startsWith('../')
+                                && (recursiveListing || path.posix.dirname(file) === directory)) {
+                                output += [recursiveListing ? relative : path.posix.basename(file),
+                                    Buffer.byteLength(remote.get(file) ?? ''), '1700000000', directories.has(file) ? 'd' : 'f'].join('\0') + '\0';
                             }
                         }
                 } else if (operation.startsWith('for p in ')) {
@@ -60,12 +66,13 @@ describe('Teleport compatibility with private cache and concurrent scanning', ()
                     } else { output = 'ok'; }
                 } else if (command === 'rsync') {
                     const [source, destination] = args.slice(-2);
-                    if (failTransfer) { failure = 'rsync connection lost'; }
+                if (failTransfer) { failure = '\u001b[31mERROR:\u001b[0m rsync connection lost'; }
                     else if (source.startsWith('deploy@node:')) {
                         fs.writeFileSync(destination, remote.get(source.match(/:'([^']+)'$/)![1])!);
                 } else if (args.includes('--relative')) {
                     const remoteRoot = destination.match(/:'([^']+)'$/)![1];
-                    for (const batchSource of args.slice(args.indexOf('--') + 1, -1)) {
+                    const sourceList = stdin.toString().split('\0').filter(Boolean);
+                    for (const batchSource of sourceList) {
                         const relative = batchSource.replace(/\\/g, '/');
                         remote.set(path.posix.join(remoteRoot, relative),
                             fs.readFileSync(path.resolve(options.cwd ?? '', batchSource), 'utf8'));
@@ -77,7 +84,7 @@ describe('Teleport compatibility with private cache and concurrent scanning', ()
                 if (listing) { activeListings--; }
                 if (output) { child.stdout.emit('data', Buffer.from(output)); }
                 if (failure) { child.stderr.emit('data', Buffer.from(failure)); }
-                child.emit('close', failure ? 1 : 0);
+                child.emit('close', command === 'rsync' && failTransfer ? 255 : failure ? 1 : 0);
             }, listing ? 15 : 1);
             return child;
         };
@@ -108,17 +115,32 @@ describe('Teleport compatibility with private cache and concurrent scanning', ()
         expect(fs.existsSync(path.join(local, '.sftp-sync'))).to.equal(false);
     });
 
-    it('reuses a plan and scans directories concurrently on subsequent previews', async () => {
+    it('reuses a plan and scans the complete Teleport tree in one session', async () => {
         for (let i = 0; i < 6; i++) { directories.add(`/remote/dir${i}`); remote.set(`/remote/dir${i}/file`, 'remote'); }
         await teleport.runSync(config(), { dryRun: true });
-        expect(peakListings).to.equal(3);
-        const listings = calls.filter((call) => call.args[call.args.length - 1]?.startsWith('find ')).length;
+        expect(peakListings).to.equal(1);
+        const listings = calls.filter((call) => call.args[call.args.length - 1]?.includes('find ')).length;
+        expect(listings).to.equal(1);
         await teleport.runSync(config());
-        expect(calls.filter((call) => call.args[call.args.length - 1]?.startsWith('find '))).to.have.length(listings);
+        expect(calls.filter((call) => call.args[call.args.length - 1]?.includes('find '))).to.have.length(listings + 1);
         expect(fs.readdirSync(local)).to.have.length(6);
         const logs: string[] = [];
         await teleport.runSync(config(), { dryRun: true, onLog: (line: string) => logs.push(line) });
         expect(logs.join('')).to.include('6 cached, 0 hashed');
+    });
+
+    it('scans thousands of remote directories through one Teleport command', async () => {
+        for (let index = 0; index < 7000; index++) {
+            directories.add(`/remote/tree-${index}`);
+            remote.set(`/remote/tree-${index}/file.txt`, 'remote');
+        }
+        await teleport.runSync(config(), { dryRun: true });
+        const listings = calls.filter((call) => call.command === 'tsh'
+            && call.args[call.args.length - 1]?.includes('find '));
+        expect(listings).to.have.length(1);
+        const command = listings[0].args[listings[0].args.length - 1];
+        expect(command).to.include('-mindepth 1');
+        expect(command).not.to.include('-maxdepth 1');
     });
 
     it('renews a missing session using the configured proxy, user and cluster', async () => {
@@ -145,7 +167,9 @@ describe('Teleport compatibility with private cache and concurrent scanning', ()
         failTransfer = true;
         let error: any;
         try { await teleport.runSync(config()); } catch (caught) { error = caught; }
+        expect(error.message).to.include('Teleport/SSH connection closed (status 255)');
         expect(error.message).to.include('rsync connection lost');
+        expect(error.message).not.to.include('\u001b[');
         expect(fs.readFileSync(file, 'utf8')).to.equal('old');
     });
     it('uploads the selected edit with legacy exclusions and no full remote listing', async () => {
@@ -160,8 +184,8 @@ describe('Teleport compatibility with private cache and concurrent scanning', ()
         expect(calls.some((call) => call.args[call.args.length - 1]?.startsWith('find '))).to.equal(false);
     });
 
-    it('uploads a batch of selected edits through one rsync session', async () => {
-        const files = Array.from({ length: 6 }, (_, index) => `edited-${index}.txt`);
+    it('uploads a large batch through one bounded rsync command and stdin file list', async () => {
+        const files = Array.from({ length: 1378 }, (_, index) => `edited-${index}.txt`);
         for (const file of files) { fs.writeFileSync(path.join(local, file), file); }
 
         await teleport.uploadChangedFiles(config(), { files });
@@ -171,8 +195,10 @@ describe('Teleport compatibility with private cache and concurrent scanning', ()
         expect(calls.filter((call) => call.command === 'tsh'
             && call.args[call.args.length - 1].startsWith('for p in '))).to.have.length(2);
         expect(transfers[0].args).to.include('--ignore-times');
+        expect(transfers[0].args).to.include.members(['--from0', '--files-from=-']);
+        expect(transfers[0].args.length).to.be.lessThan(20);
         expect(transfers[0].args).not.to.include('--checksum');
-        expect([...remote.keys()].sort()).to.deep.equal(files.map((file) => `/remote/${file}`));
+        expect([...remote.keys()].sort()).to.deep.equal(files.map((file) => `/remote/${file}`).sort());
     });
 
     it('aborts the active rsync process', async () => {
