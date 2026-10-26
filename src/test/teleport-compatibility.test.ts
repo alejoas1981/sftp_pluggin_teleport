@@ -46,10 +46,8 @@ describe('Teleport compatibility with private cache and concurrent scanning', ()
                                     Buffer.byteLength(remote.get(file) ?? ''), '1700000000', directories.has(file) ? 'd' : 'f'].join('\0') + '\0';
                             }
                         }
-                } else if (operation.startsWith('for p in ')) {
-                    const argumentsOnly = operation.slice(0, operation.indexOf('; do'));
-                    for (const match of argumentsOnly.matchAll(/'([^']+)'/g)) {
-                        const file = match[1];
+                } else if (operation.startsWith('xargs -0 ')) {
+                    for (const file of stdin.toString().split('\0').filter(Boolean)) {
                         output += remote.has(file) ? `${Buffer.byteLength(remote.get(file)!)} 1700000000 regular-file\n`
                             : directories.has(file) ? '0 1700000000 directory\n' : '0 0 missing\n';
                     }
@@ -192,8 +190,10 @@ describe('Teleport compatibility with private cache and concurrent scanning', ()
 
         const transfers = calls.filter((call) => call.command === 'rsync');
         expect(transfers).to.have.length(1);
-        expect(calls.filter((call) => call.command === 'tsh'
-            && call.args[call.args.length - 1].startsWith('for p in '))).to.have.length(2);
+        const metadataChecks = calls.filter((call) => call.command === 'tsh'
+            && call.args[call.args.length - 1].startsWith('xargs -0 '));
+        expect(metadataChecks).to.have.length(2);
+        expect(metadataChecks.every((call) => call.args[call.args.length - 1].length < 500)).to.equal(true);
         expect(transfers[0].args).to.include('--ignore-times');
         expect(transfers[0].args).to.include.members(['--from0', '--files-from=-']);
         expect(transfers[0].args.length).to.be.lessThan(20);
@@ -219,7 +219,7 @@ describe('Teleport compatibility with private cache and concurrent scanning', ()
                     setImmediate(() => {
                         const operation = args[args.length - 1];
                         if (args[0] === 'status') { child.stdout.emit('data', Buffer.from('Logged in')); child.emit('close', 0); }
-                        else if (operation.startsWith('for p in ')) {
+                        else if (operation.startsWith('xargs -0 ')) {
                             child.stdout.emit('data', Buffer.from('0 0 missing'));
                             child.emit('close', 0);
                         } else if (operation.includes("stat -c")) {

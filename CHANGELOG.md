@@ -10,6 +10,7 @@
 - The extension runtime and dependencies are bundled into one JavaScript entry point, reducing VSIX file count and install size.
 - Full Teleport synchronization reads the remote tree with one recursive command instead of opening one SSH session per directory.
 - Large upload batches use a null-delimited rsync file list over stdin, avoiding command-length failures after branch switches.
+- Teleport metadata checks also stream large path lists over stdin, so branch changes with thousands of files do not overflow the SSH command.
 - Local hash cache results are persisted before remote scanning so cancelling a slow server scan does not discard completed local work.
 
 ### Added

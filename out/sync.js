@@ -538,16 +538,19 @@ function escapeShell(arg) {
  * Runs a tsh ssh command with the configured Teleport options.
  * @param config - The SFTP configuration.
  * @param command - The command to execute on the remote host.
+ * @param rawOutput - Preserve stdout whitespace and null separators.
+ * @param signal - Optional cancellation signal.
+ * @param input - Optional data forwarded to the remote command through stdin.
  * @returns {Promise<string>} The command output.
  */
-async function runTshCommand(config, command, rawOutput = false, signal) {
+async function runTshCommand(config, command, rawOutput = false, signal, input) {
     const tshPath = await (0, teleport_installer_1.ensureTsh)();
     const args = ['ssh'];
     if (config.teleportCluster) {
         args.push('--cluster', config.teleportCluster);
     }
     args.push(`${config.sftpUser}@${config.sftpHost}`, command);
-    return spawnCommand(tshPath, args, { env: process.env, rawOutput, signal });
+    return spawnCommand(tshPath, args, { env: process.env, rawOutput, signal, input });
 }
 /**
  * Teleport client implementation using tsh and rsync.
@@ -592,14 +595,19 @@ class TeleportClient {
             throw error;
         }
     }
+    /**
+     * Reads metadata for many paths without placing those paths in the SSH command line.
+     * @param remotePaths - Absolute remote paths to inspect in input order.
+     * @returns Metadata keyed by the requested remote path.
+     */
     async statMany(remotePaths) {
         if (remotePaths.length === 0) {
             return new Map();
         }
-        const pathArguments = remotePaths.map(escapeShell).join(' '), command = `for p in ${pathArguments}; do if [ -L "$p" ]; then printf '0 0 symbolic-link\\n'; `
-            + `elif [ -d "$p" ]; then LC_ALL=C stat -c '%s %Y directory' -- "$p"; `
-            + `elif [ -f "$p" ]; then LC_ALL=C stat -c '%s %Y regular-file' -- "$p"; `
-            + `else printf '0 0 missing\\n'; fi; done`, output = await runTshCommand(this.config, command, false, this.signal), lines = output.split('\n');
+        const command = `xargs -0 -n 1 sh -c 'p="$1"; if [ -L "$p" ]; then printf "0 0 symbolic-link\\n"; `
+            + `elif [ -d "$p" ]; then LC_ALL=C stat -c "%s %Y directory" -- "$p"; `
+            + `elif [ -f "$p" ]; then LC_ALL=C stat -c "%s %Y regular-file" -- "$p"; `
+            + `else printf "0 0 missing\\n"; fi' sh`, input = Buffer.from(`${remotePaths.join('\0')}\0`), output = await runTshCommand(this.config, command, false, this.signal, input), lines = output.split('\n');
         if (lines.length !== remotePaths.length) {
             throw new Error('Incomplete Teleport metadata response');
         }
