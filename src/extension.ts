@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import { getConfiguration, updateTransferButtonVisibility, initializeConfiguration, hasPrivateConfiguration, saveConfiguration, deleteConfiguration, getPassword, resolveMode, SftpConfig } from './config';
-import { runSync, testConnection, ensureTeleportSession, uploadFile, downloadFile, deleteRemoteFile, syncFile, uploadChangedFiles } from './sync';
+import { runSync, testConnection, ensureTeleportSession, uploadFile, downloadFile, deleteRemoteFile, syncFile, uploadChangedFiles, cancelActiveTransfer } from './sync';
 import { startWatching, stopWatching } from './watcher';
 import { createStatusBar, updateSftpStatus, startLoading, stopLoading } from './status';
 import { renderProgress } from './progress';
@@ -56,6 +56,7 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.commands.registerCommand('sftpPluggin.testTeleport', () => runCommand(runConnectionTest)),
         vscode.commands.registerCommand('sftpPluggin.startWatching', () => runCommand((cfg) => startWatcher(context, cfg))),
         vscode.commands.registerCommand('sftpPluggin.stopWatching', stopWatcher),
+        vscode.commands.registerCommand('sftpPluggin.cancelTransfer', cancelTransfer),
         vscode.commands.registerCommand('sftpPluggin.uploadActiveFile', () => runCommand(uploadActiveFile)),
         vscode.commands.registerCommand('sftpPluggin.downloadActiveFile', () => runCommand(downloadActiveFile)),
         vscode.commands.registerCommand('sftpPluggin.syncFile', () => runCommand(syncActiveFile)),
@@ -333,6 +334,14 @@ function stopWatcher(): void {
     outputChannel.appendLine('SFTP watcher stopped');
 }
 
+function cancelTransfer(): void {
+    if (!cancelActiveTransfer()) {
+        vscode.window.showInformationMessage('No active SFTP transfer');
+        return;
+    }
+    outputChannel.appendLine('Cancelling active transfer…');
+}
+
 /**
  * Opens the SFTP configuration webview panel.
  * @param context - The VS Code extension context.
@@ -436,6 +445,12 @@ function openConfigPanel(context: vscode.ExtensionContext) {
                     stopLoading('$(error) SFTP: error');
                     post({ command: 'testResult', status: 'error', detail: error.message });
                 }
+                break;
+            }
+            case 'cancel': {
+                const cancelled = cancelActiveTransfer();
+                post({ command: 'cancelResult', status: cancelled ? 'warning' : 'error',
+                    detail: cancelled ? 'Cancelling transfer…' : 'No active transfer' });
                 break;
             }
             case 'sync':

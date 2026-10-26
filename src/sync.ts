@@ -15,7 +15,19 @@ export { SyncEngine } from './sync-engine';
 const SESSION_CACHE_MS = 60000,
     remoteActionQueue = new PQueue({ concurrency: 1 });
 
-let cachedSession: { configKey: string; output: string; validUntil: number } | undefined;
+let cachedSession: { configKey: string; output: string; validUntil: number } | undefined,
+    activeTransferController: AbortController | undefined;
+
+export interface TransferPath {
+    localPath: string;
+    remotePath: string;
+}
+
+export function cancelActiveTransfer(): boolean {
+    if (!activeTransferController || activeTransferController.signal.aborted) { return false; }
+    activeTransferController.abort();
+    return true;
+}
 
 /**
  * Checks whether the given error represents a missing file.
@@ -55,7 +67,9 @@ export interface RemoteClient {
     test(): Promise<void>;
     list(remoteDir: string): Promise<RemoteItem[]>;
     stat(remotePath: string): Promise<RemoteItem | undefined>;
+    statMany?(remotePaths: string[]): Promise<Map<string, RemoteItem | undefined>>;
     put(localPath: string, remotePath: string): Promise<void>;
+    putMany?(files: TransferPath[]): Promise<void>;
     get(remotePath: string, localPath: string): Promise<void>;
     mkdir(remotePath: string): Promise<void>;
     delete(remotePath: string): Promise<void>;
@@ -69,13 +83,16 @@ class SftpClient implements RemoteClient {
     private config: SftpConfig;
     private client?: SshClient;
     private sftp?: SFTPWrapper;
+    private readonly signal?: AbortSignal;
 
     /**
      * Creates a new SFTP client.
      * @param config - The SFTP configuration.
      */
-    constructor(config: SftpConfig) {
+    constructor(config: SftpConfig, signal?: AbortSignal) {
         this.config = config;
+        this.signal = signal;
+        signal?.addEventListener('abort', () => { void this.close(); }, { once: true });
     }
 
     /**
@@ -206,6 +223,7 @@ class SftpClient implements RemoteClient {
      * @returns {Promise<SFTPWrapper>} The SFTP wrapper.
      */
     private async connect(): Promise<SFTPWrapper> {
+        if (this.signal?.aborted) { throw new Error('Transfer cancelled'); }
         if (this.sftp) {
             return this.sftp;
         }
@@ -332,14 +350,20 @@ class FtpClient implements RemoteClient {
     private connected = false;
     private operations = new PQueue({ concurrency: 1 });
     private loginDirectory = "/";
+    private readonly signal?: AbortSignal;
 
     /**
      * Creates a new FTP client.
      * @param config - The SFTP configuration.
      */
-    constructor(config: SftpConfig) {
+    constructor(config: SftpConfig, signal?: AbortSignal) {
         this.config = config;
+        this.signal = signal;
         this.client = new BasicFtpClient();
+        signal?.addEventListener('abort', () => {
+            this.client.close();
+            this.connected = false;
+        }, { once: true });
     }
 
     /**
@@ -469,6 +493,7 @@ class FtpClient implements RemoteClient {
      * @returns {Promise<void>}
      */
     private async connect(): Promise<void> {
+        if (this.signal?.aborted) { throw new Error('Transfer cancelled'); }
         if (this.connected) {
             return;
         }
@@ -508,14 +533,14 @@ class FtpPool implements RemoteClient {
     private readonly available: FtpClient[] = [];
     private readonly queue: PQueue;
 
-    constructor(private readonly config: SftpConfig) {
+    constructor(private readonly config: SftpConfig, private readonly signal?: AbortSignal) {
         this.queue = new PQueue({ concurrency: Math.max(transferConcurrency(config.concurrency), transferConcurrency(config.scanConcurrency)) });
     }
 
     private async use<T>(action: (client: FtpClient) => Promise<T>): Promise<T> {
         return this.queue.add(async () => {
             let client = this.available.pop();
-            if (!client) { client = new FtpClient(this.config); this.clients.push(client); }
+            if (!client) { client = new FtpClient(this.config, this.signal); this.clients.push(client); }
             try { return await action(client); }
             finally { this.available.push(client); }
         });
@@ -550,14 +575,14 @@ function escapeShell(arg: string): string {
  * @param command - The command to execute on the remote host.
  * @returns {Promise<string>} The command output.
  */
-async function runTshCommand(config: SftpConfig, command: string, rawOutput = false): Promise<string> {
+async function runTshCommand(config: SftpConfig, command: string, rawOutput = false, signal?: AbortSignal): Promise<string> {
     const tshPath = await ensureTsh();
     const args: string[] = ['ssh'];
     if (config.teleportCluster) {
         args.push('--cluster', config.teleportCluster);
     }
     args.push(`${config.sftpUser}@${config.sftpHost}`, command);
-    return spawnCommand(tshPath, args, { env: process.env, rawOutput });
+    return spawnCommand(tshPath, args, { env: process.env, rawOutput, signal });
 }
 
 /**
@@ -570,7 +595,7 @@ class TeleportClient implements RemoteClient {
      * Creates a new Teleport client.
      * @param config - The SFTP configuration.
      */
-    constructor(config: SftpConfig) {
+    constructor(config: SftpConfig, private readonly signal?: AbortSignal) {
         this.config = config;
     }
 
@@ -579,7 +604,7 @@ class TeleportClient implements RemoteClient {
      * @returns {Promise<void>}
      */
     async test(): Promise<void> {
-        await runTshCommand(this.config, 'echo ok');
+        await runTshCommand(this.config, 'echo ok', false, this.signal);
     }
 
     /**
@@ -590,7 +615,7 @@ class TeleportClient implements RemoteClient {
     async stat(remotePath: string): Promise<RemoteItem | undefined> {
         const p = escapeShell(remotePath);
         try {
-            const output = await runTshCommand(this.config, `LC_ALL=C stat -c '%s %Y %F' -- ${p}`),
+            const output = await runTshCommand(this.config, `LC_ALL=C stat -c '%s %Y %F' -- ${p}`, false, this.signal),
                 parts = output.trim().split(' '),
                 size = parseInt(parts[0], 10) || 0,
                 mtime = parseInt(parts[1], 10) || 0,
@@ -608,6 +633,29 @@ class TeleportClient implements RemoteClient {
         }
     }
 
+    async statMany(remotePaths: string[]): Promise<Map<string, RemoteItem | undefined>> {
+        if (remotePaths.length === 0) { return new Map(); }
+        const pathArguments = remotePaths.map(escapeShell).join(' '),
+            command = `for p in ${pathArguments}; do if [ -L "$p" ]; then printf '0 0 symbolic-link\\n'; `
+                + `elif [ -d "$p" ]; then LC_ALL=C stat -c '%s %Y directory' -- "$p"; `
+                + `elif [ -f "$p" ]; then LC_ALL=C stat -c '%s %Y regular-file' -- "$p"; `
+                + `else printf '0 0 missing\\n'; fi; done`,
+            output = await runTshCommand(this.config, command, false, this.signal),
+            lines = output.split('\n');
+        if (lines.length !== remotePaths.length) { throw new Error('Incomplete Teleport metadata response'); }
+        return new Map(remotePaths.map((remotePath, index) => {
+            const [size, mtime, type] = lines[index].split(' ');
+            if (type === 'missing') { return [remotePath, undefined]; }
+            return [remotePath, {
+                name: path.posix.basename(remotePath),
+                size: parseInt(size, 10) || 0,
+                modifyTime: (parseInt(mtime, 10) || 0) * 1000,
+                isDirectory: type === 'directory',
+                isSymbolicLink: type === 'symbolic-link'
+            }];
+        }));
+    }
+
     /**
      * Lists the contents of a remote directory using tsh find.
      * @param remoteDir - The remote directory path.
@@ -615,7 +663,7 @@ class TeleportClient implements RemoteClient {
      */
     async list(remoteDir: string): Promise<RemoteItem[]> {
         const dir = escapeShell(normalizeRemotePath(remoteDir)),
-            output = await runTshCommand(this.config, `find ${dir} -maxdepth 1 -mindepth 1 -printf '%f\\0%s\\0%T@\\0%y\\0'`, true),
+            output = await runTshCommand(this.config, `find ${dir} -maxdepth 1 -mindepth 1 -printf '%f\\0%s\\0%T@\\0%y\\0'`, true, this.signal),
             items: RemoteItem[] = [];
         const fields = output.split('\0');
         for (let index = 0; index + 3 < fields.length; index += 4) {
@@ -641,11 +689,30 @@ class TeleportClient implements RemoteClient {
      * @returns {Promise<void>}
      */
     async put(localPath: string, remotePath: string): Promise<void> {
-        const parent = escapeShell(path.posix.dirname(remotePath));
-        await runTshCommand(this.config, `mkdir -p ${parent}`);
+        await this.putMany([{ localPath, remotePath }]);
+    }
+
+    async putMany(files: TransferPath[]): Promise<void> {
+        if (files.length === 0) { return; }
         const args = await this.getRsyncArgs(),
-            remoteSpec = `${this.config.sftpUser}@${this.config.sftpHost}:${escapeShell(remotePath)}`;
-        await spawnCommand('rsync', [...args, '--', localPath, remoteSpec], { env: process.env });
+            localRoot = path.resolve(this.config.localPath!),
+            remoteRoot = normalizeRemotePath(this.config.remotePath!),
+            sources = files.map(({ localPath, remotePath }) => {
+                const relativeLocal = path.relative(localRoot, localPath).replace(/\\/g, '/'),
+                    relativeRemote = path.posix.relative(remoteRoot, remotePath);
+                if (!relativeLocal || relativeLocal.startsWith('../') || path.isAbsolute(relativeLocal)
+                    || relativeRemote !== relativeLocal) {
+                    throw new Error(`Unsafe Teleport upload path: ${relativeLocal || localPath}`);
+                }
+                return relativeLocal.split('/').join(path.sep);
+            }),
+            destinationRoot = remoteRoot === '/' ? '/' : `${remoteRoot}/`,
+            remoteSpec = `${this.config.sftpUser}@${this.config.sftpHost}:${escapeShell(destinationRoot)}`;
+        await spawnCommand('rsync', [...args, '--relative', '--', ...sources, remoteSpec], {
+            env: process.env,
+            cwd: localRoot,
+            signal: this.signal
+        });
     }
 
     /**
@@ -658,7 +725,7 @@ class TeleportClient implements RemoteClient {
         ensureLocalDir(localPath);
         const args = await this.getRsyncArgs(),
             remoteSpec = `${this.config.sftpUser}@${this.config.sftpHost}:${escapeShell(remotePath)}`;
-        await spawnCommand('rsync', [...args, '--', remoteSpec, localPath], { env: process.env });
+        await spawnCommand('rsync', [...args, '--', remoteSpec, localPath], { env: process.env, signal: this.signal });
     }
 
     /**
@@ -668,7 +735,7 @@ class TeleportClient implements RemoteClient {
      */
     async mkdir(remotePath: string): Promise<void> {
         const dir = escapeShell(normalizeRemotePath(remotePath));
-        await runTshCommand(this.config, `mkdir -p ${dir}`);
+        await runTshCommand(this.config, `mkdir -p ${dir}`, false, this.signal);
     }
 
     /**
@@ -678,7 +745,7 @@ class TeleportClient implements RemoteClient {
      */
     async delete(remotePath: string): Promise<void> {
         const p = escapeShell(remotePath);
-        await runTshCommand(this.config, `rm -f ${p}`);
+        await runTshCommand(this.config, `rm -f ${p}`, false, this.signal);
     }
 
     /**
@@ -697,7 +764,7 @@ class TeleportClient implements RemoteClient {
         const tshPath = await ensureTsh(),
             shell = `${escapeShell(tshPath)} ssh${this.config.teleportCluster ? ` --cluster=${escapeShell(this.config.teleportCluster)}` : ''}`,
             extras = normalizeRsyncOptions(this.config).rsyncFlags?.split(/\s+/).filter(Boolean) ?? [];
-        return ['-tz', '--checksum', '-e', shell, ...extras];
+        return ['-rtz', '--ignore-times', '-e', shell, ...extras];
     }
 
 }
@@ -707,15 +774,15 @@ class TeleportClient implements RemoteClient {
  * @param config - The SFTP configuration.
  * @returns {RemoteClient} The created client.
  */
-function createRemoteClient(config: SftpConfig): RemoteClient {
+function createRemoteClient(config: SftpConfig, signal?: AbortSignal): RemoteClient {
     const mode = resolveMode(config);
     if (mode === 'ftp') {
-        return new FtpPool(config);
+        return new FtpPool(config, signal);
     }
     if (mode === 'teleport') {
-        return new TeleportClient(config);
+        return new TeleportClient(config, signal);
     }
-    return new SftpClient(config);
+    return new SftpClient(config, signal);
 }
 
 /**
@@ -727,14 +794,21 @@ function createRemoteClient(config: SftpConfig): RemoteClient {
 async function withRemoteClient<T>(config: SftpConfig, action: (client: RemoteClient) => Promise<T>): Promise<T> {
     config = normalizeRsyncOptions(config);
     return remoteActionQueue.add(async () => {
-        if (resolveMode(config) === 'teleport') {
-            await ensureTeleportSession(config);
-        }
-        const client = createRemoteClient(config);
+        const controller = new AbortController();
+        activeTransferController = controller;
+        let client: RemoteClient | undefined;
+        let rejectCancellation: ((reason: Error) => void) | undefined;
+        const cancellation = new Promise<never>((_resolve, reject) => { rejectCancellation = reject; }),
+            onAbort = () => rejectCancellation?.(new Error('Transfer cancelled'));
+        controller.signal.addEventListener('abort', onAbort, { once: true });
         try {
-            return await action(client);
+            if (resolveMode(config) === 'teleport') { await ensureTeleportSession(config); }
+            client = createRemoteClient(config, controller.signal);
+            return await Promise.race([action(client), cancellation]);
         } finally {
-            await client.close();
+            controller.signal.removeEventListener('abort', onAbort);
+            await client?.close();
+            if (activeTransferController === controller) { activeTransferController = undefined; }
         }
     });
 }
@@ -980,14 +1054,18 @@ export function validateConfig(config: SftpConfig): void {
 function spawnCommand(
     command: string,
     args: string[],
-    options: { env?: NodeJS.ProcessEnv; cwd?: string; rawOutput?: boolean; onOutput?: (text: string) => void }
+    options: { env?: NodeJS.ProcessEnv; cwd?: string; rawOutput?: boolean; onOutput?: (text: string) => void; signal?: AbortSignal }
 ): Promise<string> {
     return new Promise<string>((resolve, reject) => {
-        const child = cp.spawn(command, args, { env: options.env, cwd: options.cwd });
+        const child = cp.spawn(command, args, { env: options.env, cwd: options.cwd, signal: options.signal });
         let stdout = '', stderr = '';
         child.stdout.on('data', (data) => { const text = data.toString(); stdout += text; options.onOutput?.(text); });
         child.stderr.on('data', (data) => { const text = data.toString(); stderr += text; options.onOutput?.(text); });
         child.on('error', (error: any) => {
+            if (error?.name === 'AbortError') {
+                reject(new Error('Transfer cancelled'));
+                return;
+            }
             if (error && error.code === 'ENOENT') {
                 reject(new Error(`${command} is not installed or not in PATH.`));
                 return;

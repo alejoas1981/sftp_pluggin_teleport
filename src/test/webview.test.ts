@@ -190,6 +190,21 @@ describe('webview config panel', () => {
         windowStub.postMessageToListeners({ data: { command: 'syncResult', status: 'ok', detail: 'Preview done' } });
     });
 
+    it('shows Cancel only during a transfer and sends the cancel request', () => {
+        expect(elements['cancel-transfer'].hidden).to.equal(true);
+
+        elements['sync-now'].click();
+        expect(elements['cancel-transfer'].hidden).to.equal(false);
+        expect(elements['cancel-transfer'].disabled).to.equal(false);
+
+        elements['cancel-transfer'].click();
+        expect(messages).to.deep.include({ command: 'cancel' });
+        expect(elements['cancel-transfer'].disabled).to.equal(true);
+
+        windowStub.postMessageToListeners({ data: { command: 'syncResult', status: 'error', detail: 'Transfer cancelled' } });
+        expect(elements['cancel-transfer'].hidden).to.equal(true);
+    });
+
     it('restores real progress and colored logs, then requests fresh state on focus', () => {
         const state = { id: 'task', status: 'running', phase: 'Transferring files', percent: 45,
             current: 9, total: 20, completedBytes: 90, totalBytes: 200, localFiles: 0, remoteFiles: 20,

@@ -22,7 +22,7 @@ describe('Teleport compatibility with private cache and concurrent scanning', ()
         configureStorage(storage);
         remote.clear(); directories.clear(); directories.add('/remote'); calls.length = 0;
         loggedIn = true; failTransfer = false; activeListings = 0; peakListings = 0;
-        const spawn = (command: string, args: string[]) => {
+        const spawn = (command: string, args: string[], options: { cwd?: string } = {}) => {
             const child: any = new EventEmitter();
             child.stdout = new EventEmitter(); child.stderr = new EventEmitter();
             calls.push({ command, args });
@@ -40,7 +40,15 @@ describe('Teleport compatibility with private cache and concurrent scanning', ()
                                 output += [path.posix.basename(file), Buffer.byteLength(remote.get(file) ?? ''), '1700000000', directories.has(file) ? 'd' : 'f'].join('\0') + '\0';
                             }
                         }
-                    } else if (operation.includes("stat -c")) {
+                } else if (operation.startsWith('for p in ')) {
+                    const argumentsOnly = operation.slice(0, operation.indexOf('; do'));
+                    for (const match of argumentsOnly.matchAll(/'([^']+)'/g)) {
+                        const file = match[1];
+                        output += remote.has(file) ? `${Buffer.byteLength(remote.get(file)!)} 1700000000 regular-file\n`
+                            : directories.has(file) ? '0 1700000000 directory\n' : '0 0 missing\n';
+                    }
+                    output = output.trimEnd();
+                } else if (operation.includes("stat -c")) {
                         const file = operation.match(/ -- '([^']+)'/)![1];
                         if (remote.has(file)) { output = `${Buffer.byteLength(remote.get(file)!)} 1700000000 regular file`; }
                         else if (directories.has(file)) { output = '0 1700000000 directory'; }
@@ -55,6 +63,13 @@ describe('Teleport compatibility with private cache and concurrent scanning', ()
                     if (failTransfer) { failure = 'rsync connection lost'; }
                     else if (source.startsWith('deploy@node:')) {
                         fs.writeFileSync(destination, remote.get(source.match(/:'([^']+)'$/)![1])!);
+                } else if (args.includes('--relative')) {
+                    const remoteRoot = destination.match(/:'([^']+)'$/)![1];
+                    for (const batchSource of args.slice(args.indexOf('--') + 1, -1)) {
+                        const relative = batchSource.replace(/\\/g, '/');
+                        remote.set(path.posix.join(remoteRoot, relative),
+                            fs.readFileSync(path.resolve(options.cwd ?? '', batchSource), 'utf8'));
+                    }
                     } else {
                         remote.set(destination.match(/:'([^']+)'$/)![1], fs.readFileSync(source, 'utf8'));
                     }
@@ -143,6 +158,63 @@ describe('Teleport compatibility with private cache and concurrent scanning', ()
         expect([...remote.keys()]).to.deep.equal(['/remote/edited.txt']);
         expect(calls.filter((call) => call.command === 'rsync')).to.have.length(1);
         expect(calls.some((call) => call.args[call.args.length - 1]?.startsWith('find '))).to.equal(false);
+    });
+
+    it('uploads a batch of selected edits through one rsync session', async () => {
+        const files = Array.from({ length: 6 }, (_, index) => `edited-${index}.txt`);
+        for (const file of files) { fs.writeFileSync(path.join(local, file), file); }
+
+        await teleport.uploadChangedFiles(config(), { files });
+
+        const transfers = calls.filter((call) => call.command === 'rsync');
+        expect(transfers).to.have.length(1);
+        expect(calls.filter((call) => call.command === 'tsh'
+            && call.args[call.args.length - 1].startsWith('for p in '))).to.have.length(2);
+        expect(transfers[0].args).to.include('--ignore-times');
+        expect(transfers[0].args).not.to.include('--checksum');
+        expect([...remote.keys()].sort()).to.deep.equal(files.map((file) => `/remote/${file}`));
+    });
+
+    it('aborts the active rsync process', async () => {
+        let transferStarted!: () => void;
+        const started = new Promise<void>((resolve) => { transferStarted = resolve; }),
+            spawn = (command: string, args: string[], options: { signal?: AbortSignal } = {}) => {
+                const child: any = new EventEmitter();
+                child.stdout = new EventEmitter();
+                child.stderr = new EventEmitter();
+                if (command === 'rsync') {
+                    transferStarted();
+                    options.signal?.addEventListener('abort', () => {
+                        const error: any = new Error('aborted');
+                        error.name = 'AbortError';
+                        child.emit('error', error);
+                    }, { once: true });
+                } else {
+                    setImmediate(() => {
+                        const operation = args[args.length - 1];
+                        if (args[0] === 'status') { child.stdout.emit('data', Buffer.from('Logged in')); child.emit('close', 0); }
+                        else if (operation.startsWith('for p in ')) {
+                            child.stdout.emit('data', Buffer.from('0 0 missing'));
+                            child.emit('close', 0);
+                        } else if (operation.includes("stat -c")) {
+                            child.stderr.emit('data', Buffer.from('cannot stat: No such file or directory'));
+                            child.emit('close', 1);
+                        } else { child.emit('close', 0); }
+                    });
+                }
+                return child;
+            },
+            cancelable = loadSync({ './teleport-installer': { ensureTsh: async () => 'tsh' },
+                'child_process': { ...childProcess, spawn } });
+        fs.writeFileSync(path.join(local, 'cancel.txt'), 'cancel me');
+
+        const pending = cancelable.uploadChangedFiles(config(), { files: ['cancel.txt'] });
+        await started;
+        expect(cancelable.cancelActiveTransfer()).to.equal(true);
+
+        let failure: any;
+        try { await pending; } catch (error) { failure = error; }
+        expect(failure.message).to.equal('Transfer cancelled');
     });
 
     it('rejects unsupported rsync options before connecting or transferring', async () => {

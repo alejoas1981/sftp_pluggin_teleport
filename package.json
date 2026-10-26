@@ -2,7 +2,7 @@
   "name": "sftp-pluggin",
   "displayName": "SFTP Plugin",
   "description": "VS Code plugin for SFTP with Teleport integration",
-  "version": "3.2.0",
+  "version": "3.2.1",
   "publisher": "alejoas1981",
   "author": {
     "name": "Savchenko Aleksey",
@@ -40,6 +40,7 @@
     "onCommand:sftpPluggin.dryRun",
     "onCommand:sftpPluggin.startWatching",
     "onCommand:sftpPluggin.stopWatching",
+    "onCommand:sftpPluggin.cancelTransfer",
     "onCommand:sftpPluggin.teleportLogin",
     "onCommand:sftpPluggin.testTeleport",
     "onCommand:sftpPluggin.uploadActiveFile",
@@ -69,6 +70,10 @@
       {
         "command": "sftpPluggin.stopWatching",
         "title": "SFTP: Stop Watching"
+      },
+      {
+        "command": "sftpPluggin.cancelTransfer",
+        "title": "SFTP: Cancel Active Transfer"
       },
       {
         "command": "sftpPluggin.teleportLogin",

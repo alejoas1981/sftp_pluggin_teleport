@@ -70,7 +70,7 @@ function activate(context) {
         (0, status_1.updateSftpStatus)(`$(${icon}) SFTP: ${progress}${state.phase}`, `${state.phase}\n${state.file}\nFiles: ${state.current}/${state.total ?? '?'} | Local: ${state.localFiles} | Remote: ${state.remoteFiles} | ${Math.floor(state.elapsedMs / 1000)}s`);
     });
     context.subscriptions.push({ dispose: () => { unsubscribe(); syncTask.dispose(); } });
-    context.subscriptions.push(vscode.commands.registerCommand('sftpPluggin.openConfig', () => openConfigPanel(context)), vscode.commands.registerCommand('sftpPluggin.teleportLogin', () => runCommand(runTeleportLogin)), vscode.commands.registerCommand('sftpPluggin.syncNow', () => runCommand((cfg) => runSyncCommand(cfg, false))), vscode.commands.registerCommand('sftpPluggin.dryRun', () => runCommand((cfg) => runSyncCommand(cfg, true))), vscode.commands.registerCommand('sftpPluggin.testTeleport', () => runCommand(runConnectionTest)), vscode.commands.registerCommand('sftpPluggin.startWatching', () => runCommand((cfg) => startWatcher(context, cfg))), vscode.commands.registerCommand('sftpPluggin.stopWatching', stopWatcher), vscode.commands.registerCommand('sftpPluggin.uploadActiveFile', () => runCommand(uploadActiveFile)), vscode.commands.registerCommand('sftpPluggin.downloadActiveFile', () => runCommand(downloadActiveFile)), vscode.commands.registerCommand('sftpPluggin.syncFile', () => runCommand(syncActiveFile)), vscode.commands.registerCommand('sftpPluggin.deleteRemote', () => runCommand(deleteActiveFile)), vscode.workspace.onWillSaveTextDocument(handleDocumentWillSave), vscode.workspace.onDidSaveTextDocument(handleDocumentSave));
+    context.subscriptions.push(vscode.commands.registerCommand('sftpPluggin.openConfig', () => openConfigPanel(context)), vscode.commands.registerCommand('sftpPluggin.teleportLogin', () => runCommand(runTeleportLogin)), vscode.commands.registerCommand('sftpPluggin.syncNow', () => runCommand((cfg) => runSyncCommand(cfg, false))), vscode.commands.registerCommand('sftpPluggin.dryRun', () => runCommand((cfg) => runSyncCommand(cfg, true))), vscode.commands.registerCommand('sftpPluggin.testTeleport', () => runCommand(runConnectionTest)), vscode.commands.registerCommand('sftpPluggin.startWatching', () => runCommand((cfg) => startWatcher(context, cfg))), vscode.commands.registerCommand('sftpPluggin.stopWatching', stopWatcher), vscode.commands.registerCommand('sftpPluggin.cancelTransfer', cancelTransfer), vscode.commands.registerCommand('sftpPluggin.uploadActiveFile', () => runCommand(uploadActiveFile)), vscode.commands.registerCommand('sftpPluggin.downloadActiveFile', () => runCommand(downloadActiveFile)), vscode.commands.registerCommand('sftpPluggin.syncFile', () => runCommand(syncActiveFile)), vscode.commands.registerCommand('sftpPluggin.deleteRemote', () => runCommand(deleteActiveFile)), vscode.workspace.onWillSaveTextDocument(handleDocumentWillSave), vscode.workspace.onDidSaveTextDocument(handleDocumentSave));
     saveUploads = new save_upload_queue_1.SaveUploadQueue(uploadSavedChanges, () => syncInProgress, (error) => {
         outputChannel.appendLine(`[save upload error] ${error.message}`);
         vscode.window.showErrorMessage(`SFTP upload failed: ${error.message}. Save again to retry.`);
@@ -337,6 +337,13 @@ function stopWatcher() {
     }
     outputChannel.appendLine('SFTP watcher stopped');
 }
+function cancelTransfer() {
+    if (!(0, sync_1.cancelActiveTransfer)()) {
+        vscode.window.showInformationMessage('No active SFTP transfer');
+        return;
+    }
+    outputChannel.appendLine('Cancelling active transfer…');
+}
 /**
  * Opens the SFTP configuration webview panel.
  * @param context - The VS Code extension context.
@@ -434,6 +441,12 @@ function openConfigPanel(context) {
                     (0, status_1.stopLoading)('$(error) SFTP: error');
                     post({ command: 'testResult', status: 'error', detail: error.message });
                 }
+                break;
+            }
+            case 'cancel': {
+                const cancelled = (0, sync_1.cancelActiveTransfer)();
+                post({ command: 'cancelResult', status: cancelled ? 'warning' : 'error',
+                    detail: cancelled ? 'Cancelling transfer…' : 'No active transfer' });
                 break;
             }
             case 'sync':

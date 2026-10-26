@@ -1,6 +1,7 @@
 const vscode = acquireVsCodeApi(),
     settingsLinkEl = document.getElementById('settings-link'),
     teleportLoginEl = document.getElementById('teleport-login'),
+    cancelTransferEl = document.getElementById('cancel-transfer'),
     fields = [
         'mode',
         'teleportHost',
@@ -85,6 +86,8 @@ function setSyncRunning(running) {
     for (const id of ['sync-now', 'dry-run', 'btn-save', 'delete-config', 'test-connection', 'teleport-login']) {
         document.getElementById(id).disabled = running;
     }
+    cancelTransferEl.hidden = !running;
+    cancelTransferEl.disabled = !running;
 }
 
 function startSync(command) {
@@ -332,6 +335,11 @@ document.getElementById('sync-now').addEventListener('click', () => {
     startSync('sync');
 });
 
+cancelTransferEl.addEventListener('click', () => {
+    cancelTransferEl.disabled = true;
+    vscode.postMessage({ command: 'cancel' });
+});
+
 document.getElementById('delete-config').addEventListener('click', () => {
     const mode = document.getElementById('mode').value;
     vscode.postMessage({ command: 'deleteConfig', mode });
@@ -364,6 +372,9 @@ window.addEventListener('message', (event) => {
             if (syncRunning) { appendActivity(`ERROR: ${message.detail}\n`); setSyncRunning(false); }
             stopProgress();
             setStatus(message.detail, 'error');
+            break;
+        case 'cancelResult':
+            setStatus(message.detail, message.status);
             break;
         case 'loginResult':
         case 'testResult':

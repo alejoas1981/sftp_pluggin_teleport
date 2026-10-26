@@ -37,6 +37,7 @@ describe('extension', () => {
             syncFile: async (_config: any, localPath: string) => { syncCalls.push(`syncFile:${localPath}`); return 'In sync'; },
             testConnection: async () => { syncCalls.push('testConnection'); return 'Connection successful'; },
             ensureTeleportSession: async () => { syncCalls.push('ensureTeleportSession'); return 'logged in'; },
+            cancelActiveTransfer: () => { syncCalls.push('cancelActiveTransfer'); return true; },
         };
         watcherMock = {
             startWatching: () => { watcherCalls.push('startWatching'); },
@@ -67,6 +68,7 @@ describe('extension', () => {
         expect(context.subscriptions.length).to.be.greaterThan(0);
         expect((vscode as any)._commands['sftpPluggin.syncNow']).to.be.a('function');
         expect((vscode as any)._commands['sftpPluggin.uploadActiveFile']).to.be.a('function');
+        expect((vscode as any)._commands['sftpPluggin.cancelTransfer']).to.be.a('function');
         expect((vscode as any)._willSaveListeners).to.have.length(1);
         expect((vscode as any)._didSaveListeners).to.have.length(1);
     });

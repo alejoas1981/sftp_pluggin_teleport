@@ -160,6 +160,71 @@ export class SyncEngine {
         let next = 0, completed = 0, failed = false;
         options.onState?.({ phase: 'Uploading local changes', current: 0, total: candidates.length, percent: 0 });
         options.onLog?.(`Local changes: ${candidates.length}; no recursive remote scan.\n`);
+        if (client.putMany && candidates.length > 1) {
+            try {
+                const remoteRoot = this.config.remotePath!,
+                    remotePaths = new Set<string>();
+                for (const [file, entry] of candidates) {
+                    remotePaths.add(path.posix.join(remoteRoot, file));
+                    let parent = path.posix.dirname(file);
+                    while (parent !== '.') {
+                        remotePaths.add(path.posix.join(remoteRoot, parent));
+                        parent = path.posix.dirname(parent);
+                    }
+                    await this.assertLocalPath(file);
+                    const currentLocal = await fingerprintLocal(path.join(this.config.localPath!, file));
+                    if (!sameLocal(currentLocal, entry)) { throw new Error(`File changed after scanning; run sync again: ${file}`); }
+                }
+                const paths = [...remotePaths],
+                    remoteStats = client.statMany ? await client.statMany(paths)
+                        : new Map(await Promise.all(paths.map(async (remotePath) => [remotePath, await client.stat(remotePath)] as const))),
+                    items: PlannedFile[] = [];
+                for (const [file, entry] of candidates) {
+                    let parent = path.posix.dirname(file);
+                    while (parent !== '.') {
+                        const target = remoteStats.get(path.posix.join(remoteRoot, parent));
+                        if (target && (!target.isDirectory || target.isSymbolicLink)) {
+                            throw new Error(`Unsafe remote parent: ${parent}`);
+                        }
+                        parent = path.posix.dirname(parent);
+                    }
+                    const remote = remoteStats.get(path.posix.join(remoteRoot, file));
+                    if (remote?.isDirectory || remote?.isSymbolicLink) { throw new Error(`Not a regular remote file: ${file}`); }
+                    const item: PlannedFile = { file, action: 'upload', local: entry, remote };
+                    items.push(item);
+                    options.onLog?.(`UPLOAD local to server: ${file} — started\n`);
+                }
+                await client.putMany(items.map((item) => ({
+                    localPath: path.join(this.config.localPath!, item.file),
+                    remotePath: path.posix.join(this.config.remotePath!, item.file)
+                })));
+                const uploadedPaths = items.map((item) => path.posix.join(remoteRoot, item.file)),
+                    uploadedStats = client.statMany ? await client.statMany(uploadedPaths)
+                        : new Map(await Promise.all(uploadedPaths.map(async (remotePath) => [remotePath, await client.stat(remotePath)] as const)));
+                for (const item of items) {
+                    const afterLocal = await fingerprintLocal(path.join(this.config.localPath!, item.file)),
+                        afterRemote = uploadedStats.get(path.posix.join(remoteRoot, item.file));
+                    if (!afterLocal || !afterRemote || afterRemote.isDirectory || afterRemote.size !== afterLocal.size
+                        || !sameLocal(afterLocal, item.local)) {
+                        throw new Error(`File changed during transfer; sync history was not updated: ${item.file}`);
+                    }
+                    this.cache?.remember(item.file, afterLocal);
+                    state.records.set(item.file, { local: afterLocal,
+                        remote: { size: afterRemote.size, modifyTime: afterRemote.modifyTime } });
+                    completed++;
+                    options.onLog?.(`UPLOAD local to server: ${item.file} — done\n`);
+                    options.onState?.({ file: item.file, current: completed,
+                        percent: Math.min(99, Math.floor(100 * completed / candidates.length)) });
+                }
+            } catch (error: any) {
+                options.onLog?.(`UPLOAD batch — failed: ${error.message}\n`);
+                throw error;
+            } finally {
+                await state.save();
+                await this.saveCache(options);
+            }
+            return `UPLOAD COMPLETE\nLocal changes processed: ${completed}\nDownload: 0\nAutomatic deletion: disabled`;
+        }
         const worker = async () => {
             while (!failed && next < candidates.length) {
                 const [file, entry] = candidates[next++];

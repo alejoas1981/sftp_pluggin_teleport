@@ -1,5 +1,16 @@
 # Changelog
 
+## 3.2.1
+
+### Changed
+
+- Save-triggered Teleport uploads batch multiple changed files into one rsync session instead of opening one session per file.
+- Teleport rsync uses `--ignore-times` after the plugin identifies changed files. This preserves rsync's delta-transfer algorithm without the extra full-file reads caused by `--checksum`.
+
+### Added
+
+- The configuration panel shows **Cancel Transfer** while synchronization is active. Cancelling aborts the active Teleport, SFTP, or FTP transport.
+
 ## 3.2.0
 
 ### Changed

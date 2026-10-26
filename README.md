@@ -51,7 +51,7 @@ When both copies changed, the log lists a conflict and neither copy is overwritt
 
 Downloads are staged locally so an interrupted transfer does not truncate the current file. Dry Run writes neither project files nor sync history. Watching responds to local filesystem events; use Sync Now to fetch server changes when no local event occurs.
 
-Teleport follows the same planner and uses per-file rsync, without `--delete`. It requires local `tsh` and `rsync`, remote `rsync`, and GNU `find`/`stat`. Extra Rsync Flags accepts `--bwlimit=N`, `--exclude PATTERN`, and `--exclude=PATTERN`, including quoted patterns. Legacy exclusions are merged with Ignore patterns before local scanning and planning; only the bandwidth flag is passed to per-file rsync. Unsupported flags fail before connecting.
+Teleport follows the same planner and uses rsync without `--delete`. Save-triggered uploads batch changed files into one rsync session and use rsync's delta-transfer algorithm. It requires local `tsh` and `rsync`, remote `rsync`, and GNU `find`/`stat`. Extra Rsync Flags accepts `--bwlimit=N`, `--exclude PATTERN`, and `--exclude=PATTERN`, including quoted patterns. Legacy exclusions are merged with Ignore patterns before local scanning and planning; only the bandwidth flag is passed to rsync. Unsupported flags fail before connecting.
 
 ## Synchronization progress and parallel transfers (3.2.0)
 
@@ -65,7 +65,7 @@ Teleport follows the same planner and uses per-file rsync, without `--delete`. I
 | Switching tabs loses the progress panel and file log. | The Webview requests the current task when it loads and regains focus. It restores progress, logs, and the result without starting another sync. |
 | Closing the Webview interrupts synchronization. | Closing the panel only detaches its observer. It does not cancel the task or close its transport clients. Reopening during execution restores the active task; reopening afterward restores its result. |
 
-**Closing the configuration tab is not cancellation.** No Cancel button was added. Closing VS Code or restarting the extension host is different: in-memory task state and prepared plans do not survive that restart.
+**Closing the configuration tab is not cancellation.** Use **Cancel Transfer** in the configuration panel or **SFTP: Cancel Active Transfer** from the Command Palette to stop the active transfer. Closing VS Code or restarting the extension host is different: in-memory task state and prepared plans do not survive that restart.
 
 ### Plan reuse and freshness
 
