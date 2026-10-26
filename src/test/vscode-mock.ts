@@ -107,6 +107,7 @@ const vscodeMock = {
             inspect: () => undefined
         }),
         createFileSystemWatcher,
+        onDidChangeConfiguration: () => ({ dispose() {} }),
         onWillSaveTextDocument: (fn: (e: any) => void) => { willSaveListeners.push(fn); return { dispose() {} }; },
         onDidSaveTextDocument: (fn: (doc: any) => void) => { didSaveListeners.push(fn); return { dispose() {} }; },
         openTextDocument: async (uri: any) => ({ uri, fileName: uri.fsPath, languageId: '', version: 1, isDirty: false })

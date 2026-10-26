@@ -80,11 +80,19 @@
       },
       {
         "command": "sftpPluggin.uploadActiveFile",
-        "title": "SFTP: Upload Active File"
+        "title": "Upload",
+        "icon": {
+          "light": "resources/icons/upload-light.svg",
+          "dark": "resources/icons/upload-dark.svg"
+        }
       },
       {
         "command": "sftpPluggin.downloadActiveFile",
-        "title": "SFTP: Download Active File"
+        "title": "Download",
+        "icon": {
+          "light": "resources/icons/download-light.svg",
+          "dark": "resources/icons/download-dark.svg"
+        }
       },
       {
         "command": "sftpPluggin.syncFile",
@@ -121,12 +129,12 @@
       "editor/title": [
         {
           "command": "sftpPluggin.uploadActiveFile",
-          "when": "config.sftpPluggin.showUploadButton && resourceFilename",
+          "when": "sftpPluggin.showUploadButton && resourceScheme == file",
           "group": "navigation@1"
         },
         {
           "command": "sftpPluggin.downloadActiveFile",
-          "when": "config.sftpPluggin.showDownloadButton && resourceFilename",
+          "when": "sftpPluggin.showDownloadButton && resourceScheme == file",
           "group": "navigation@2"
         }
       ]

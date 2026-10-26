@@ -1,12 +1,13 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
-import { getConfiguration, initializeConfiguration, hasPrivateConfiguration, saveConfiguration, deleteConfiguration, getPassword, resolveMode, SftpConfig } from './config';
+import { getConfiguration, updateTransferButtonVisibility, initializeConfiguration, hasPrivateConfiguration, saveConfiguration, deleteConfiguration, getPassword, resolveMode, SftpConfig } from './config';
 import { runSync, testConnection, ensureTeleportSession, uploadFile, downloadFile, deleteRemoteFile, syncFile, uploadChangedFiles } from './sync';
 import { startWatching, stopWatching } from './watcher';
 import { createStatusBar, updateSftpStatus, startLoading, stopLoading } from './status';
 import { renderProgress } from './progress';
 import { SyncTask } from './sync-task';
+import { normalizeRsyncOptions } from './rsync-options';
 import { SaveUploadQueue } from './save-upload-queue';
 import { isIgnored } from './utils';
 import { SYNC_EXCLUDES } from './sync-state';
@@ -14,6 +15,8 @@ import { configureStorage } from './private-storage';
 
 let outputChannel: vscode.OutputChannel, extensionContext: vscode.ExtensionContext, syncInProgress = false;
 let saveUploads: SaveUploadQueue | undefined, savingBatch = false;
+const pendingUploads = new Map<string, number>();
+let changeSequence = 0;
 const saveReasons = new Map<string, number>(), syncTask = new SyncTask();
 
 /**
@@ -24,6 +27,11 @@ const saveReasons = new Map<string, number>(), syncTask = new SyncTask();
 export function activate(context: vscode.ExtensionContext) {
     extensionContext = context;
     initializeConfiguration(context);
+    context.subscriptions.push(vscode.workspace.onDidChangeConfiguration((event) => {
+        if (event.affectsConfiguration('sftpPluggin')) {
+            updateTransferButtonVisibility();
+        }
+    }));
     configureStorage(context.globalStorageUri.fsPath, vscode.workspace.workspaceFolders?.map((folder) => folder.uri.fsPath));
     outputChannel = vscode.window.createOutputChannel('SFTP Plugin');
     context.subscriptions.push(outputChannel);
@@ -63,9 +71,11 @@ export function activate(context: vscode.ExtensionContext) {
         }, () => Math.max(50, getConfiguration().debounceMs ?? 300));
     const uploadWatcher = vscode.workspace.createFileSystemWatcher('**/*', false, false, true),
         onDiskChange = (uri: vscode.Uri) => {
-            if (savingBatch || uri.scheme !== 'file'
-                || !vscode.workspace.getConfiguration('sftpPluggin').get<boolean>('uploadOnAutoSave', false)) { return; }
-            if (isUploadPath(getConfiguration(), uri.fsPath)) { saveUploads?.request(); }
+            if (uri.scheme !== 'file' || !isUploadPath(getConfiguration(), uri.fsPath)) { return; }
+            pendingUploads.set(uri.fsPath, ++changeSequence);
+            if (!savingBatch && vscode.workspace.getConfiguration('sftpPluggin').get<boolean>('uploadOnAutoSave', false)) {
+                saveUploads?.request();
+            }
         };
     uploadWatcher.onDidChange(onDiskChange);
     uploadWatcher.onDidCreate(onDiskChange);
@@ -509,6 +519,7 @@ function handleDocumentSave(doc: vscode.TextDocument): void {
         reason = saveReasons.get(uri);
     saveReasons.delete(uri);
 
+    if (isUploadPath(getConfiguration(), doc.fileName)) { pendingUploads.set(doc.fileName, ++changeSequence); }
     const settings = vscode.workspace.getConfiguration('sftpPluggin'),
         uploadOnSave = settings.get<boolean>('uploadOnSave', true),
         uploadOnAutoSave = settings.get<boolean>('uploadOnAutoSave', false);
@@ -525,9 +536,12 @@ function handleDocumentSave(doc: vscode.TextDocument): void {
 
 function isUploadPath(config: SftpConfig, file: string): boolean {
     try {
+        let exclusions = config.ignore ?? [];
+        try { exclusions = normalizeRsyncOptions(config).ignore ?? []; }
+        catch { /* Let the upload report invalid flags instead of silently ignoring saves. */ }
         const relative = path.relative(resolveLocalRoot(config), file).replace(/\\/g, '/');
         return !!relative && relative !== '..' && !relative.startsWith('../') && !path.isAbsolute(relative)
-            && !isIgnored(relative, [...(config.ignore ?? []), ...SYNC_EXCLUDES]);
+            && !isIgnored(relative, [...exclusions, ...SYNC_EXCLUDES]);
     } catch { return false; }
 }
 
@@ -548,10 +562,16 @@ async function uploadSavedChanges(): Promise<void> {
         } finally { savingBatch = false; }
         syncTask.log('UPLOAD: locally changed files only; no remote tree scan.\n');
         await ensureTeleportIfNeeded(config);
-        const result = await uploadChangedFiles(config, {
+        const batch = new Map([...pendingUploads].filter(([file]) => isUploadPath(config, file))),
+            root = resolveLocalRoot(config),
+            result = await uploadChangedFiles(config, {
+            files: [...batch.keys()].map((file) => path.relative(root, file).replace(/\\/g, '/')),
             onLog: (text) => { syncTask.log(text); outputChannel.appendLine(text.trimEnd()); },
             onState: (state) => syncTask.update(state),
         });
+        for (const [file, sequence] of batch) {
+            if (pendingUploads.get(file) === sequence) { pendingUploads.delete(file); }
+        }
         outputChannel.appendLine(result);
         syncTask.finish(result);
     } catch (error: any) {
@@ -567,6 +587,7 @@ async function uploadSavedChanges(): Promise<void> {
 export function deactivate() {
     saveUploads?.dispose();
     saveReasons.clear();
+    pendingUploads.clear();
     syncTask.dispose();
     stopWatching();
 }

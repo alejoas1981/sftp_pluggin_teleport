@@ -215,4 +215,34 @@ describe('extension', () => {
         expect(syncCalls).to.include('uploadChanged');
     });
 
+    it('queues filesystem edits with auto upload disabled and flushes only those paths on manual save', async () => {
+        const batches: string[][] = [];
+        syncMock.uploadChangedFiles = async (_config: any, options: any) => { batches.push(options.files); return 'UPLOAD COMPLETE'; };
+        (vscode as any)._values.uploadOnAutoSave = false;
+        ext.activate(context);
+        (vscode as any)._watchers[0]._trigger('didChange', vscode.Uri.file(path.join(tempDir, 'ai-edit.txt')));
+        await new Promise((resolve) => setTimeout(resolve, 70));
+        expect(batches).to.have.length(0);
+        save(path.join(tempDir, 'active.txt'), 1);
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        expect(batches[0].sort()).to.deep.equal(['active.txt', 'ai-edit.txt']);
+        save(path.join(tempDir, 'active.txt'), 1);
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        expect(batches[1]).to.deep.equal(['active.txt']);
+    });
+
+    it('retains failed paths for the next save', async () => {
+        const batches: string[][] = [];
+        syncMock.uploadChangedFiles = async (_config: any, options: any) => {
+            batches.push(options.files);
+            if (batches.length === 1) { throw new Error('offline'); }
+            return 'UPLOAD COMPLETE';
+        };
+        ext.activate(context); save(path.join(tempDir, 'first.txt'), 1);
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        save(path.join(tempDir, 'second.txt'), 1);
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        expect(batches[1].sort()).to.deep.equal(['first.txt', 'second.txt']);
+    });
+
 });

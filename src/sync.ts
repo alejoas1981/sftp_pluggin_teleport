@@ -1,3 +1,4 @@
+import { normalizeRsyncOptions } from './rsync-options';
 import * as cp from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -695,10 +696,7 @@ class TeleportClient implements RemoteClient {
     private async getRsyncArgs(): Promise<string[]> {
         const tshPath = await ensureTsh(),
             shell = `${escapeShell(tshPath)} ssh${this.config.teleportCluster ? ` --cluster=${escapeShell(this.config.teleportCluster)}` : ''}`,
-            extras = this.config.rsyncFlags?.split(/\s+/).filter(Boolean) ?? [];
-        if (extras.some((flag) => !/^--bwlimit=\d+$/.test(flag))) {
-            throw new Error('Two-way sync only accepts --bwlimit=N in Extra Rsync Flags. Use Ignore patterns for exclusions.');
-        }
+            extras = normalizeRsyncOptions(this.config).rsyncFlags?.split(/\s+/).filter(Boolean) ?? [];
         return ['-tz', '--checksum', '-e', shell, ...extras];
     }
 
@@ -727,6 +725,7 @@ function createRemoteClient(config: SftpConfig): RemoteClient {
  * @returns {Promise<T>} The action result.
  */
 async function withRemoteClient<T>(config: SftpConfig, action: (client: RemoteClient) => Promise<T>): Promise<T> {
+    config = normalizeRsyncOptions(config);
     return remoteActionQueue.add(async () => {
         if (resolveMode(config) === 'teleport') {
             await ensureTeleportSession(config);

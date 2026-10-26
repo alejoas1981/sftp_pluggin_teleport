@@ -133,4 +133,24 @@ describe('Teleport compatibility with private cache and concurrent scanning', ()
         expect(error.message).to.include('rsync connection lost');
         expect(fs.readFileSync(file, 'utf8')).to.equal('old');
     });
+    it('uploads the selected edit with legacy exclusions and no full remote listing', async () => {
+        fs.writeFileSync(path.join(local, 'edited.txt'), 'edit');
+        fs.writeFileSync(path.join(local, '.DS_Store'), 'ignored');
+        fs.writeFileSync(path.join(local, '.env'), 'ignored');
+        fs.writeFileSync(path.join(local, 'unrelated.txt'), 'unrelated');
+        await teleport.uploadChangedFiles({ ...config(), rsyncFlags: "--exclude .git --exclude .vscode --exclude .windsurfrules --exclude node_modules --exclude .DS_Store --exclude '*.log' --exclude .env --exclude vendor --exclude debugbar --exclude cache" },
+            { files: ['edited.txt', '.DS_Store', '.env'] });
+        expect([...remote.keys()]).to.deep.equal(['/remote/edited.txt']);
+        expect(calls.filter((call) => call.command === 'rsync')).to.have.length(1);
+        expect(calls.some((call) => call.args[call.args.length - 1]?.startsWith('find '))).to.equal(false);
+    });
+
+    it('rejects unsupported rsync options before connecting or transferring', async () => {
+        let failure: any;
+        try { await teleport.uploadChangedFiles({ ...config(), rsyncFlags: '--delete' }, { files: ['edited.txt'] }); }
+        catch (error) { failure = error; }
+        expect(failure.message).to.include('Unsupported Extra Rsync Flags');
+        expect(calls).to.have.length(0);
+    });
+
 });

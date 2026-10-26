@@ -3,6 +3,7 @@ import * as path from 'path';
 import ignore from 'ignore';
 import { createHash, randomUUID } from 'crypto';
 import { transferConcurrency } from './utils';
+import { normalizeRsyncOptions } from './rsync-options';
 import { ScanCache } from './scan-cache';
 import type { SftpConfig } from './config';
 import type { RemoteClient, RemoteItem, SyncOptions } from './sync';
@@ -46,7 +47,7 @@ function describe(item: PlannedFile): string {
 /** One non-destructive synchronization policy shared by all transports. */
 export class SyncEngine {
     private cache?: ScanCache;
-    constructor(private readonly config: SftpConfig) {}
+    constructor(private readonly config: SftpConfig) { this.config = normalizeRsyncOptions(config); }
 
     async sync(client: RemoteClient, options: SyncOptions = {}): Promise<string> {
         const state = new SyncState(this.config),
@@ -152,8 +153,9 @@ export class SyncEngine {
         await state.load();
         this.cache = new ScanCache(this.config.localPath!);
         await this.cache.load();
-        const local = await this.collectLocal(filter, undefined, options),
+        const local = await this.collectLocal(filter, options.files, options),
             candidates = [...local].filter(([file, entry]) => !entry.isDirectory && !entry.isSymbolicLink
+                && (options.files ? options.files.includes(file) : state.records.has(file))
                 && !sameLocal(entry, state.records.get(file)?.local));
         let next = 0, completed = 0, failed = false;
         options.onState?.({ phase: 'Uploading local changes', current: 0, total: candidates.length, percent: 0 });
@@ -173,13 +175,9 @@ export class SyncEngine {
                     }
                     const remote = await client.stat(path.posix.join(this.config.remotePath!, file));
                     if (remote?.isDirectory || remote?.isSymbolicLink) { throw new Error(`Not a regular remote file: ${file}`); }
-                    if (!state.records.has(file) && remote && sameMetadata(entry, remote)) {
-                        state.records.set(file, { local: entry, remote });
-                    } else {
-                        options.onLog?.(`UPLOAD local to server: ${file} — started\n`);
-                        await this.execute(client, { file, action: 'upload', local: entry, remote }, state);
-                        options.onLog?.(`UPLOAD local to server: ${file} — done\n`);
-                    }
+                    options.onLog?.(`UPLOAD local to server: ${file} — started\n`);
+                    await this.execute(client, { file, action: 'upload', local: entry, remote }, state);
+                    options.onLog?.(`UPLOAD local to server: ${file} — done\n`);
                     completed++;
                     options.onState?.({ file, current: completed, percent: Math.min(99, Math.floor(100 * completed / candidates.length)) });
                 } catch (error: any) {

@@ -38,6 +38,7 @@ exports.testConnection = testConnection;
 exports.loginToTeleport = loginToTeleport;
 exports.ensureTeleportSession = ensureTeleportSession;
 exports.validateConfig = validateConfig;
+const rsync_options_1 = require("./rsync-options");
 const cp = __importStar(require("child_process"));
 const path = __importStar(require("path"));
 const basic_ftp_1 = require("basic-ftp");
@@ -644,10 +645,7 @@ class TeleportClient {
      * @returns {Promise<string[]>} The rsync argument list.
      */
     async getRsyncArgs() {
-        const tshPath = await (0, teleport_installer_1.ensureTsh)(), shell = `${escapeShell(tshPath)} ssh${this.config.teleportCluster ? ` --cluster=${escapeShell(this.config.teleportCluster)}` : ''}`, extras = this.config.rsyncFlags?.split(/\s+/).filter(Boolean) ?? [];
-        if (extras.some((flag) => !/^--bwlimit=\d+$/.test(flag))) {
-            throw new Error('Two-way sync only accepts --bwlimit=N in Extra Rsync Flags. Use Ignore patterns for exclusions.');
-        }
+        const tshPath = await (0, teleport_installer_1.ensureTsh)(), shell = `${escapeShell(tshPath)} ssh${this.config.teleportCluster ? ` --cluster=${escapeShell(this.config.teleportCluster)}` : ''}`, extras = (0, rsync_options_1.normalizeRsyncOptions)(this.config).rsyncFlags?.split(/\s+/).filter(Boolean) ?? [];
         return ['-tz', '--checksum', '-e', shell, ...extras];
     }
 }
@@ -673,6 +671,7 @@ function createRemoteClient(config) {
  * @returns {Promise<T>} The action result.
  */
 async function withRemoteClient(config, action) {
+    config = (0, rsync_options_1.normalizeRsyncOptions)(config);
     return remoteActionQueue.add(async () => {
         if ((0, config_1.resolveMode)(config) === 'teleport') {
             await ensureTeleportSession(config);

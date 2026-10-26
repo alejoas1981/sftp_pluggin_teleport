@@ -41,6 +41,13 @@ let configurationState: vscode.Memento | undefined;
 
 export function initializeConfiguration(context: vscode.ExtensionContext): void {
     configurationState = context.workspaceState;
+    updateTransferButtonVisibility();
+}
+
+export function updateTransferButtonVisibility(): void {
+    const config = getConfiguration();
+    void vscode.commands.executeCommand('setContext', 'sftpPluggin.showUploadButton', config.showUploadButton === true);
+    void vscode.commands.executeCommand('setContext', 'sftpPluggin.showDownloadButton', config.showDownloadButton === true);
 }
 
 export function hasPrivateConfiguration(): boolean {
@@ -128,6 +135,7 @@ export async function saveConfiguration(
     saved.useTeleport = mode === 'teleport';
     await context.workspaceState.update(privateConfigKey, saved);
     configurationState = context.workspaceState;
+    updateTransferButtonVisibility();
 
     if (config.savePassword && config.password) {
         await context.secrets.store('sftpPluggin.password', config.password);
@@ -155,6 +163,7 @@ export async function deleteConfiguration(
     saved.mode = saved.mode ?? 'ftp';
     await context.workspaceState.update(privateConfigKey, saved);
     configurationState = context.workspaceState;
+    updateTransferButtonVisibility();
 }
 
 /**

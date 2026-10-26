@@ -34,12 +34,15 @@ const watcher_1 = require("./watcher");
 const status_1 = require("./status");
 const progress_1 = require("./progress");
 const sync_task_1 = require("./sync-task");
+const rsync_options_1 = require("./rsync-options");
 const save_upload_queue_1 = require("./save-upload-queue");
 const utils_1 = require("./utils");
 const sync_state_1 = require("./sync-state");
 const private_storage_1 = require("./private-storage");
 let outputChannel, extensionContext, syncInProgress = false;
 let saveUploads, savingBatch = false;
+const pendingUploads = new Map();
+let changeSequence = 0;
 const saveReasons = new Map(), syncTask = new sync_task_1.SyncTask();
 /**
  * Activates the SFTP plugin and registers commands and event listeners.
@@ -49,6 +52,11 @@ const saveReasons = new Map(), syncTask = new sync_task_1.SyncTask();
 function activate(context) {
     extensionContext = context;
     (0, config_1.initializeConfiguration)(context);
+    context.subscriptions.push(vscode.workspace.onDidChangeConfiguration((event) => {
+        if (event.affectsConfiguration('sftpPluggin')) {
+            (0, config_1.updateTransferButtonVisibility)();
+        }
+    }));
     (0, private_storage_1.configureStorage)(context.globalStorageUri.fsPath, vscode.workspace.workspaceFolders?.map((folder) => folder.uri.fsPath));
     outputChannel = vscode.window.createOutputChannel('SFTP Plugin');
     context.subscriptions.push(outputChannel);
@@ -68,11 +76,11 @@ function activate(context) {
         vscode.window.showErrorMessage(`SFTP upload failed: ${error.message}. Save again to retry.`);
     }, () => Math.max(50, (0, config_1.getConfiguration)().debounceMs ?? 300));
     const uploadWatcher = vscode.workspace.createFileSystemWatcher('**/*', false, false, true), onDiskChange = (uri) => {
-        if (savingBatch || uri.scheme !== 'file'
-            || !vscode.workspace.getConfiguration('sftpPluggin').get('uploadOnAutoSave', false)) {
+        if (uri.scheme !== 'file' || !isUploadPath((0, config_1.getConfiguration)(), uri.fsPath)) {
             return;
         }
-        if (isUploadPath((0, config_1.getConfiguration)(), uri.fsPath)) {
+        pendingUploads.set(uri.fsPath, ++changeSequence);
+        if (!savingBatch && vscode.workspace.getConfiguration('sftpPluggin').get('uploadOnAutoSave', false)) {
             saveUploads?.request();
         }
     };
@@ -503,6 +511,9 @@ function handleDocumentSave(doc) {
     }
     const uri = doc.uri.toString(), reason = saveReasons.get(uri);
     saveReasons.delete(uri);
+    if (isUploadPath((0, config_1.getConfiguration)(), doc.fileName)) {
+        pendingUploads.set(doc.fileName, ++changeSequence);
+    }
     const settings = vscode.workspace.getConfiguration('sftpPluggin'), uploadOnSave = settings.get('uploadOnSave', true), uploadOnAutoSave = settings.get('uploadOnAutoSave', false);
     const isManual = reason === vscode.TextDocumentSaveReason.Manual, isAuto = reason === vscode.TextDocumentSaveReason.AfterDelay || reason === vscode.TextDocumentSaveReason.FocusOut;
     if (isManual && !uploadOnSave) {
@@ -520,9 +531,14 @@ function handleDocumentSave(doc) {
 }
 function isUploadPath(config, file) {
     try {
+        let exclusions = config.ignore ?? [];
+        try {
+            exclusions = (0, rsync_options_1.normalizeRsyncOptions)(config).ignore ?? [];
+        }
+        catch { /* Let the upload report invalid flags instead of silently ignoring saves. */ }
         const relative = path.relative(resolveLocalRoot(config), file).replace(/\\/g, '/');
         return !!relative && relative !== '..' && !relative.startsWith('../') && !path.isAbsolute(relative)
-            && !(0, utils_1.isIgnored)(relative, [...(config.ignore ?? []), ...sync_state_1.SYNC_EXCLUDES]);
+            && !(0, utils_1.isIgnored)(relative, [...exclusions, ...sync_state_1.SYNC_EXCLUDES]);
     }
     catch {
         return false;
@@ -553,10 +569,16 @@ async function uploadSavedChanges() {
         }
         syncTask.log('UPLOAD: locally changed files only; no remote tree scan.\n');
         await ensureTeleportIfNeeded(config);
-        const result = await (0, sync_1.uploadChangedFiles)(config, {
+        const batch = new Map([...pendingUploads].filter(([file]) => isUploadPath(config, file))), root = resolveLocalRoot(config), result = await (0, sync_1.uploadChangedFiles)(config, {
+            files: [...batch.keys()].map((file) => path.relative(root, file).replace(/\\/g, '/')),
             onLog: (text) => { syncTask.log(text); outputChannel.appendLine(text.trimEnd()); },
             onState: (state) => syncTask.update(state),
         });
+        for (const [file, sequence] of batch) {
+            if (pendingUploads.get(file) === sequence) {
+                pendingUploads.delete(file);
+            }
+        }
         outputChannel.appendLine(result);
         syncTask.finish(result);
     }
@@ -575,6 +597,7 @@ async function uploadSavedChanges() {
 function deactivate() {
     saveUploads?.dispose();
     saveReasons.clear();
+    pendingUploads.clear();
     syncTask.dispose();
     (0, watcher_1.stopWatching)();
 }
