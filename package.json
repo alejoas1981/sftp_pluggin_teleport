@@ -1,7 +1,7 @@
 {
   "name": "sftp-pluggin",
   "displayName": "SFTP Plugin",
-  "description": "VS Code plugin for SFTP with Teleport integration",
+  "description": "FTP, FTPS, SFTP and Teleport file synchronization with a visual configuration panel and persistent upload queue.",
   "version": "3.2.1",
   "publisher": "alejoas1981",
   "author": {
@@ -46,7 +46,8 @@
     "onCommand:sftpPluggin.uploadActiveFile",
     "onCommand:sftpPluggin.downloadActiveFile",
     "onCommand:sftpPluggin.syncFile",
-    "onCommand:sftpPluggin.deleteRemote"
+    "onCommand:sftpPluggin.deleteRemote",
+    "onCommand:sftpPluggin.retryUploads"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -106,6 +107,10 @@
       {
         "command": "sftpPluggin.deleteRemote",
         "title": "SFTP: Delete Remote File"
+      },
+      {
+        "command": "sftpPluggin.retryUploads",
+        "title": "SFTP Retry Pending Uploads"
       }
     ],
     "menus": {
@@ -185,7 +190,7 @@
         "sftpPluggin.sftpPort": {
           "type": "number",
           "default": 22,
-          "description": "SFTP/SSH port (default 22)"
+          "description": "SSH port for SFTP mode. Teleport connections use tsh routing instead."
         },
         "sftpPluggin.teleportHost": {
           "type": "string",
@@ -210,22 +215,22 @@
         "sftpPluggin.localPath": {
           "type": "string",
           "default": "",
-          "description": "Local project path"
+          "description": "Absolute local project directory. The plugin does not expand workspaceFolder or environment variables."
         },
         "sftpPluggin.privateKey": {
           "type": "string",
           "default": "",
-          "description": "SSH private key path or key content"
+          "description": "SSH private key path or inline key content for SFTP mode only. Saved form values are ordinary workspace state, not SecretStorage."
         },
         "sftpPluggin.passphrase": {
           "type": "string",
           "default": "",
-          "description": "Passphrase for the SSH private key"
+          "description": "Private key passphrase for SFTP mode only. Saved form values are ordinary workspace state, not SecretStorage."
         },
         "sftpPluggin.agent": {
           "type": "string",
           "default": "",
-          "description": "SSH agent socket or 'pageant'"
+          "description": "SSH agent socket path or pageant for SFTP mode only. Teleport uses tsh credentials."
         },
         "sftpPluggin.ignore": {
           "type": "array",
@@ -233,39 +238,41 @@
           "items": {
             "type": "string"
           },
-          "description": "Patterns to ignore during sync"
+          "description": "Ignore patterns applied to both directions and queued uploads. Built in exclusions always include .git, .vscode and .sftp-sync."
         },
         "sftpPluggin.concurrency": {
           "type": "integer",
           "default": 4,
-          "description": "Parallel file transfers: 1 for sequential, 2–16 for simultaneous transfers (separate connections for FTP/FTPS)",
+          "description": "Parallel file workers from 1 to 16. FTP and FTPS use separate connections. Teleport save batches use one rsync session.",
           "minimum": 1,
           "maximum": 16
         },
         "sftpPluggin.ftpPassive": {
           "type": "boolean",
           "default": true,
-          "description": "Use passive mode for FTP"
+          "description": "Prefer IPv4 passive FTP when enabled. When disabled, use the library default passive strategy. Active FTP is not implemented."
         },
         "sftpPluggin.ftpSecure": {
           "type": "boolean",
           "default": false,
-          "description": "Use FTPS (TLS) — encrypted FTP connection; enable if the server requires AUTH TLS"
+          "description": "Use FTPS (TLS) \u2014 encrypted FTP connection; enable if the server requires AUTH TLS"
         },
         "sftpPluggin.identity": {
           "type": "string",
           "default": "",
-          "description": "SSH private key path"
+          "description": "Legacy SFTP key path used only when privateKey is undefined. Prefer privateKey.",
+          "deprecationMessage": "Legacy SFTP key path used only when privateKey is undefined. Prefer privateKey."
         },
         "sftpPluggin.sshFlags": {
           "type": "string",
           "default": "",
-          "description": "Extra SSH flags"
+          "description": "Legacy compatibility field. Not used by the current transports.",
+          "deprecationMessage": "Legacy compatibility field. Not used by the current transports."
         },
         "sftpPluggin.rsyncFlags": {
           "type": "string",
           "default": "",
-          "description": "Extra rsync flags"
+          "description": "Teleport only. Supports --bwlimit=N, --exclude PATTERN and --exclude=PATTERN. Exclusions join Ignore rules. Other flags are rejected."
         },
         "sftpPluggin.debounceMs": {
           "type": "number",
@@ -275,39 +282,41 @@
         "sftpPluggin.useRsync": {
           "type": "boolean",
           "default": false,
-          "description": "Use rsync for SFTP sync (otherwise lftp)"
+          "description": "Legacy compatibility field. Does not select a transport. SFTP uses ssh2 and Teleport always uses tsh with rsync.",
+          "deprecationMessage": "Legacy compatibility field. Does not select a transport. SFTP uses ssh2 and Teleport always uses tsh with rsync."
         },
         "sftpPluggin.useTeleport": {
           "type": "boolean",
           "default": false,
-          "description": "Use Teleport for connection"
+          "description": "Legacy mode fallback used only when mode is absent. Select mode explicitly for new configurations.",
+          "deprecationMessage": "Legacy mode fallback used only when mode is absent. Select mode explicitly for new configurations."
         },
         "sftpPluggin.uploadOnSave": {
           "type": "boolean",
           "default": true,
-          "description": "Upload all locally changed project files after manual save (Ctrl+S); local versions overwrite remote copies"
+          "description": "Upload queued local project changes after manual save. Local copies overwrite remote copies. Does not run two way conflict detection."
         },
         "sftpPluggin.uploadOnAutoSave": {
           "type": "boolean",
           "default": false,
-          "description": "Upload all locally changed project files after auto-save or workspace file changes; local versions overwrite remote copies"
+          "description": "Upload queued local changes after editor Auto Save or observed workspace file events. Does not enable editor Auto Save or scan the whole project."
         },
         "sftpPluggin.showUploadButton": {
           "type": "boolean",
           "default": false,
-          "description": "Show the Upload Active File button in the editor title"
+          "description": "Show Upload in the editor title. After saving a private configuration, change this preference in the configuration panel."
         },
         "sftpPluggin.showDownloadButton": {
           "type": "boolean",
           "default": false,
-          "description": "Show the Download Active File button in the editor title"
+          "description": "Show Download in the editor title. After saving a private configuration, change this preference in the configuration panel."
         },
         "sftpPluggin.scanConcurrency": {
           "type": "integer",
           "default": 4,
           "minimum": 1,
           "maximum": 16,
-          "description": "Parallel remote directory listings for FTP/FTPS, SFTP and Teleport. Set 1 for servers that require sequential scanning."
+          "description": "Remote directory scan concurrency from 1 to 16 where individual listings are used. Full Teleport analysis uses one recursive remote command."
         },
         "sftpPluggin.verifyContents": {
           "type": "boolean",
@@ -348,5 +357,17 @@
     "ssh2": "^1.17.0",
     "tar": "^7.5.22",
     "upath": "^2.0.1"
-  }
+  },
+  "homepage": "https://github.com/alejoas1981/sftp_pluggin_teleport#readme",
+  "bugs": {
+    "url": "https://github.com/alejoas1981/sftp_pluggin_teleport/issues"
+  },
+  "keywords": [
+    "ftp",
+    "ftps",
+    "sftp",
+    "teleport",
+    "sync",
+    "upload"
+  ]
 }

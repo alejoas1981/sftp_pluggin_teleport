@@ -209,32 +209,40 @@ describe('extension', () => {
         expect(syncCalls.filter((call) => call === 'uploadChanged')).to.have.length(2);
     });
 
-    it('cancels and restarts an obsolete automatic upload after a working-tree update', async () => {
+    it('retains new and repeated disk edits without cancelling an active upload', async () => {
         (vscode as any)._values.uploadOnAutoSave = true;
         const batches: string[][] = [];
-        let rejectTransfer: ((error: Error) => void) | undefined;
+        let release!: () => void;
         syncMock.uploadChangedFiles = async (_config: any, options: any) => {
             batches.push(options.files);
-            if (batches.length === 1) {
-                await new Promise<never>((_resolve, reject) => { rejectTransfer = reject; });
-            }
+            if (batches.length === 1) { await new Promise<void>((resolve) => { release = resolve; }); }
             return 'UPLOAD COMPLETE';
         };
-        syncMock.cancelActiveTransfer = () => {
-            syncCalls.push('cancelActiveTransfer');
-            rejectTransfer?.(new Error('Transfer cancelled'));
-            return true;
-        };
         ext.activate(context);
-        save(path.join(tempDir, 'before-pull.txt'), 1);
+        save(path.join(tempDir, 'first.txt'), 1);
         await new Promise((resolve) => setTimeout(resolve, 80));
-        (vscode as any)._watchers[0]._trigger('didChange', vscode.Uri.file(path.join(tempDir, 'after-pull.txt')));
-        await new Promise((resolve) => setTimeout(resolve, 180));
-        expect(syncCalls.filter((call) => call === 'cancelActiveTransfer')).to.have.length(1);
-        expect(batches).to.have.length(2);
-        expect(batches[1]).to.include('after-pull.txt');
-        const output = (vscode as any)._outputChannels[0];
-        expect(output.lines.some((line: string) => line.includes('restarting with the latest version'))).to.equal(true);
+        for (const file of ['first.txt', 'second.txt']) {
+            (vscode as any)._watchers[0]._trigger('didChange', vscode.Uri.file(path.join(tempDir, file)));
+        }
+        await new Promise((resolve) => setTimeout(resolve, 80));
+        expect(syncCalls).not.to.include('cancelActiveTransfer');
+        expect(batches).to.have.length(1);
+        release();
+        await new Promise((resolve) => setTimeout(resolve, 120));
+        expect(batches[1].sort()).to.deep.equal(['first.txt', 'second.txt']);
+    });
+
+    it('restores pending paths after reactivation and retries through the command', async () => {
+        const batches: string[][] = [];
+        syncMock.uploadChangedFiles = async (_config: any, options: any) => { batches.push(options.files); return 'done'; };
+        ext.activate(context);
+        (vscode as any)._watchers[0]._trigger('didChange', vscode.Uri.file(path.join(tempDir, 'waiting.txt')));
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        ext.deactivate();
+        ext.activate(context);
+        (vscode as any)._commands['sftpPluggin.retryUploads']();
+        await new Promise((resolve) => setTimeout(resolve, 120));
+        expect(batches).to.deep.equal([['waiting.txt']]);
     });
 
     it('uploads external filesystem edits when auto-save uploads are enabled', async () => {
@@ -259,6 +267,17 @@ describe('extension', () => {
         save(path.join(tempDir, 'active.txt'), 1);
         await new Promise((resolve) => setTimeout(resolve, 100));
         expect(batches[1]).to.deep.equal(['active.txt']);
+    });
+
+    it('does not repeatedly schedule paths excluded after they were queued', async () => {
+        let batches = 0;
+        syncMock.uploadChangedFiles = async () => { batches++; return 'done'; };
+        ext.activate(context);
+        (vscode as any)._watchers[0]._trigger('didChange', vscode.Uri.file(path.join(tempDir, 'ignore.txt')));
+        (vscode as any)._values.ignore = ['ignore.txt'];
+        (vscode as any)._commands['sftpPluggin.retryUploads']();
+        await new Promise((resolve) => setTimeout(resolve, 180));
+        expect(batches).to.equal(1);
     });
 
     it('retains failed paths for the next save', async () => {

@@ -12,6 +12,8 @@ import { SyncEngine } from './sync-engine';
 import type { SyncProgress } from './sync-task';
 export { SyncEngine } from './sync-engine';
 
+const loginOptions = new Map<string, LoginOptions>(), recoveries = new Map<string, Promise<string>>();
+
 const SESSION_CACHE_MS = 60000,
     remoteActionQueue = new PQueue({ concurrency: 1 });
 
@@ -53,6 +55,7 @@ export interface SyncOptions {
 
 export interface LoginOptions {
     onLink?: (url: string) => void;
+    onConfirmTrust?: (prompt: string) => Promise<boolean>;
 }
 
 export interface RemoteItem {
@@ -844,13 +847,23 @@ async function withRemoteClient<T>(config: SftpConfig, action: (client: RemoteCl
             onAbort = () => rejectCancellation?.(new Error('Transfer cancelled'));
         controller.signal.addEventListener('abort', onAbort, { once: true });
         try {
-            if (resolveMode(config) === 'teleport') { await ensureTeleportSession(config); }
-            client = createRemoteClient(config, controller.signal);
-            return await Promise.race([action(client), cancellation]);
+            for (let attempt = 0; ; attempt++) {
+                try {
+                    if (resolveMode(config) === 'teleport') { await ensureTeleportSession(config); }
+                    if (controller.signal.aborted) { throw new Error('Transfer cancelled'); }
+                    client = createRemoteClient(config, controller.signal);
+                    return await Promise.race([action(client), cancellation]);
+                } catch (error) {
+                    if (attempt || controller.signal.aborted || resolveMode(config) !== 'teleport' || !isTeleportAuthenticationError(error)) { throw error; }
+                    await client?.close();
+                    client = undefined;
+                    await Promise.race([recoverTeleportSession(config), cancellation]);
+                }
+            }
         } finally {
             controller.signal.removeEventListener('abort', onAbort);
-            await client?.close();
-            if (activeTransferController === controller) { activeTransferController = undefined; }
+            try { await client?.close(); }
+            finally { if (activeTransferController === controller) { activeTransferController = undefined; } }
         }
     });
 }
@@ -997,10 +1010,24 @@ export async function loginToTeleport(config: SftpConfig, options: LoginOptions 
 
     return new Promise<string>((resolve, reject) => {
         const child = cp.spawn(tshPath, args, { env: process.env });
-        let stdout = '', stderr = '', linkSent = false;
+        let stdout = '', stderr = '', linkSent = false, trustRequested = false, promptBuffer = '';
+        const timeout = setTimeout(() => { child.kill(); reject(new Error('Teleport login timed out')); }, 120000);
 
         const handleData = (data: Buffer): string => {
             const text = data.toString();
+            promptBuffer = (promptBuffer + text).slice(-8192);
+            if (!trustRequested && /yes\/no|\[y\/n\]|type.*yes|enter.*yes/i.test(promptBuffer)) {
+                trustRequested = true;
+                if (!options.onConfirmTrust) {
+                    child.kill();
+                    reject(new Error('Teleport certificate confirmation required. Run Teleport Login.'));
+                } else {
+                    void options.onConfirmTrust(promptBuffer).then((confirmed) => {
+                        if (confirmed && child.exitCode === null) { child.stdin.write('yes\n'); }
+                        else { child.kill(); reject(new Error('Teleport certificate confirmation declined')); }
+                    }).catch((error) => { child.kill(); reject(error); });
+                }
+            }
             if (options.onLink) {
                 const proxyHost = config.teleportHost
                     ? config.teleportHost.replace(/^https?:\/\//, '').split('/')[0]
@@ -1018,8 +1045,9 @@ export async function loginToTeleport(config: SftpConfig, options: LoginOptions 
 
         child.stdout.on('data', (data) => { stdout += handleData(data); });
         child.stderr.on('data', (data) => { stderr += handleData(data); });
-        child.on('error', reject);
+        child.on('error', (error) => { clearTimeout(timeout); reject(error); });
         child.on('close', (code) => {
+            clearTimeout(timeout);
             if (code !== 0) {
                 const message = stderr.trim() || stdout.trim() || `tsh login exited with code ${code}`;
                 reject(new Error(message));
@@ -1028,6 +1056,33 @@ export async function loginToTeleport(config: SftpConfig, options: LoginOptions 
             resolve(stdout.trim());
         });
     });
+}
+
+/** Identifies credential and trust failures that can justify one renewed session. */
+function isTeleportAuthenticationError(error: unknown): boolean {
+    return /x509: certificate signed by unknown authority|certificate.*expired|session.*expired|not logged in|relogin/i.test(error instanceof Error ? error.message : String(error));
+}
+
+/** Identifies the proxy profile shared by login and transfer recovery. */
+function teleportSessionKey(config: SftpConfig): string {
+    return JSON.stringify([config.teleportHost, config.teleportUser, config.teleportCluster]);
+}
+
+/** Shares one targeted logout and login between all operations using a proxy profile. */
+async function recoverTeleportSession(config: SftpConfig): Promise<string> {
+    const key = teleportSessionKey(config), existing = recoveries.get(key);
+    if (existing) { return existing; }
+    const recovery = (async () => {
+        cachedSession = undefined;
+        const tshPath = await ensureTsh();
+        await spawnCommand(tshPath, ['logout', `--proxy=${config.teleportHost}`, `--user=${config.teleportUser}`], { env: process.env });
+        const out = await loginToTeleport(config, loginOptions.get(key));
+        cachedSession = { configKey: key, output: out, validUntil: Date.now() + SESSION_CACHE_MS };
+        return out;
+    })();
+    recoveries.set(key, recovery);
+    try { return await recovery; }
+    finally { recoveries.delete(key); }
 }
 
 /**
@@ -1040,7 +1095,11 @@ export async function ensureTeleportSession(config: SftpConfig, options: LoginOp
     if (resolveMode(config) !== 'teleport') {
         return '';
     }
-    const key = `${config.teleportHost}:${config.teleportUser}:${config.teleportCluster}`;
+    const key = teleportSessionKey(config);
+    if (options.onLink || options.onConfirmTrust) { loginOptions.set(key, options); }
+    options = loginOptions.get(key) ?? options;
+    const recovering = recoveries.get(key);
+    if (recovering) { return recovering; }
     if (cachedSession && cachedSession.configKey === key && Date.now() < cachedSession.validUntil) {
         return cachedSession.output;
     }
@@ -1052,8 +1111,9 @@ export async function ensureTeleportSession(config: SftpConfig, options: LoginOp
         }
         cachedSession = { configKey: key, output: out, validUntil: Date.now() + SESSION_CACHE_MS };
         return out;
-    } catch {
-        const out = await loginToTeleport(config, options);
+    } catch (error) {
+        const out = isTeleportAuthenticationError(error)
+            ? await recoverTeleportSession(config) : await loginToTeleport(config, options);
         cachedSession = { configKey: key, output: out, validUntil: Date.now() + SESSION_CACHE_MS };
         return out;
     }

@@ -10,7 +10,7 @@ import { loadSync } from '../../test/proxyquire-helper.cjs';
 
 describe('Teleport compatibility with private cache and concurrent scanning', () => {
     let local: string, storage: string, teleport: any, loggedIn: boolean, failTransfer: boolean,
-        activeListings: number, peakListings: number;
+        activeListings: number, peakListings: number, authFailures: number;
     const remote = new Map<string, string>(), directories = new Set<string>(), calls: Array<{ command: string; args: string[] }> = [],
         config = () => ({ mode: 'teleport', teleportHost: 'proxy.example.test', teleportUser: 'login-user',
             teleportCluster: 'cluster-one', sftpHost: 'node', sftpUser: 'deploy', remotePath: '/remote', localPath: local,
@@ -21,7 +21,7 @@ describe('Teleport compatibility with private cache and concurrent scanning', ()
         storage = fs.mkdtempSync(path.join(os.tmpdir(), 'teleport-state-'));
         configureStorage(storage);
         remote.clear(); directories.clear(); directories.add('/remote'); calls.length = 0;
-        loggedIn = true; failTransfer = false; activeListings = 0; peakListings = 0;
+        loggedIn = true; failTransfer = false; authFailures = 0; activeListings = 0; peakListings = 0;
         const spawn = (command: string, args: string[], options: { cwd?: string; input?: string | Buffer } = {}) => {
             const child: any = new EventEmitter();
             let stdin = Buffer.alloc(0);
@@ -64,7 +64,8 @@ describe('Teleport compatibility with private cache and concurrent scanning', ()
                     } else { output = 'ok'; }
                 } else if (command === 'rsync') {
                     const [source, destination] = args.slice(-2);
-                if (failTransfer) { failure = '\u001b[31mERROR:\u001b[0m rsync connection lost'; }
+                if (authFailures > 0) { authFailures--; failure = 'x509: certificate signed by unknown authority'; }
+                    else if (failTransfer) { failure = '\u001b[31mERROR:\u001b[0m rsync connection lost'; }
                     else if (source.startsWith('deploy@node:')) {
                         fs.writeFileSync(destination, remote.get(source.match(/:'([^']+)'$/)![1])!);
                 } else if (args.includes('--relative')) {
@@ -199,6 +200,26 @@ describe('Teleport compatibility with private cache and concurrent scanning', ()
         expect(transfers[0].args.length).to.be.lessThan(20);
         expect(transfers[0].args).not.to.include('--checksum');
         expect([...remote.keys()].sort()).to.deep.equal(files.map((file) => `/remote/${file}`).sort());
+    });
+
+    it('renews a cached session after a transfer certificate error and retries once', async () => {
+        fs.writeFileSync(path.join(local, 'renew.txt'), 'latest');
+        await teleport.ensureTeleportSession(config());
+        authFailures = 1;
+        await teleport.uploadChangedFiles(config(), { files: ['renew.txt'] });
+        expect(remote.get('/remote/renew.txt')).to.equal('latest');
+        expect(calls.filter((call) => call.args[0] === 'logout')).to.have.length(1);
+        expect(calls.find((call) => call.args[0] === 'logout')!.args).to.include('--proxy=proxy.example.test');
+        expect(calls.filter((call) => call.args[0] === 'login')).to.have.length(1);
+        expect(calls.filter((call) => call.command === 'rsync')).to.have.length(2);
+    });
+    it('stops authentication recovery after a repeated certificate error', async () => {
+        fs.writeFileSync(path.join(local, 'renew.txt'), 'latest');
+        authFailures = 2;
+        const failure = await teleport.uploadChangedFiles(config(), { files: ['renew.txt'] }).catch((error: Error) => error);
+        expect(failure.message).to.include('unknown authority');
+        expect(calls.filter((call) => call.args[0] === 'login')).to.have.length(1);
+        expect(calls.filter((call) => call.command === 'rsync')).to.have.length(2);
     });
 
     it('aborts the active rsync process', async () => {

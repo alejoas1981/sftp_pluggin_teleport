@@ -1,70 +1,38 @@
-# Changelog
+**Changelog.**
 
-## 3.2.1
+**3.2.1.**
 
-### Changed
+1. Local save and external edit uploads use a persistent versioned path queue. New disk changes retain newer versions without cancelling an unrelated active upload.
+2. Pending paths survive extension restarts and are isolated by connection destination. Added SFTP Retry Pending Uploads and status feedback for pending or paused uploads.
+3. Temporary upload failures receive bounded retries with increasing delays. Cancellation and persistent errors preserve pending work for a later request.
+4. Recognized Teleport certificate and session failures trigger targeted logout and login followed by one operation retry. Certificate trust prompts require explicit confirmation. Browser login links remain available and login has a timeout.
+5. Teleport uploads batch selected files into one rsync session with a file list streamed through stdin. Metadata path lists are streamed too. Full Teleport analysis uses one recursive remote listing command.
+6. Teleport forces transfer of locally identified changed files while preserving the rsync delta algorithm. Legacy rsync exclusions join the common Ignore rules and bandwidth limits remain supported.
+7. Local hash caches and synchronization history use private extension storage. Cached local hashes are persisted before remote analysis and can be reused when metadata matches. Directory scan concurrency and complete local content verification are configurable.
+8. The progress panel supports cancellation, shared restored task state, bounded recent logs and live upload, download and complete session durations. Closing the panel does not cancel a task.
+9. The runtime and dependencies are bundled into one JavaScript entry point for packaging.
+10. Documentation now describes actual settings precedence, optional JSON configuration, current commands and scripts, transport limits and release verification. Corrected the optional settings example and license attribution. Added security information and bundled dependency notices. Version remains 3.2.1.
 
-- Save-triggered Teleport uploads batch multiple changed files into one rsync session instead of opening one session per file.
-- Teleport rsync uses `--ignore-times` after the plugin identifies changed files. This preserves rsync's delta-transfer algorithm without the extra full-file reads caused by `--checksum`.
-- Automatic uploads cancel an obsolete transfer after a branch switch, pull, save, or external file update and restart from the debounced latest snapshot.
-- The extension runtime and dependencies are bundled into one JavaScript entry point, reducing VSIX file count and install size.
-- Full Teleport synchronization reads the remote tree with one recursive command instead of opening one SSH session per directory.
-- Large upload batches use a null-delimited rsync file list over stdin, avoiding command-length failures after branch switches.
-- Teleport metadata checks also stream large path lists over stdin, so branch changes with thousands of files do not overflow the SSH command.
-- Local hash cache results are persisted before remote scanning so cancelling a slow server scan does not discard completed local work.
+**3.2.0.**
 
-### Added
+1. Introduced shared synchronization in both directions for FTP, SFTP and Teleport, including remote project import into an empty local directory.
+2. Replaced automatic deletion and directory mirroring with copying missing files. Added history based conflict detection and explicit file commands to select an authoritative copy.
+3. Added transfer and conflict plans, temporary download staging, symbolic link and path collision handling, and exclusions for internal state, Git and VS Code settings.
+4. Teleport used per file rsync with restricted arguments. Later 3.2.1 changes introduced batching and legacy exclusion parsing. Save behavior described for this historical version was superseded by the local upload queue.
+5. Remote comparison used server size and modification time. Changes preserving both could be missed. Teleport required local tsh and rsync, remote rsync and GNU find and stat.
 
-- The configuration panel shows **Cancel Transfer** while synchronization is active. Cancelling aborts the active Teleport, SFTP, or FTP transport.
-- Progress and final results report upload, download, and complete session durations in milliseconds.
-- Active transfer timers now advance while a file is in flight; transfer phases display as pending during scanning instead of reporting a misleading zero.
+**3.1.2.**
 
-## 3.2.0
+1. Added a scrollable live transfer log in the configuration panel, automatic following and per file activity entries.
+2. Updated transfer button icons, prevented duplicate panel operations and stopped Dry Run from creating the remote root directory.
 
-### Changed
-- Sync Now, Sync Active File, save-triggered sync and watching use the same two-way policy for FTP, SFTP and Teleport. An empty local folder imports the remote project.
-- Missing files are copied to the other side; automatic deletion and Teleport directory mirroring with `--delete` have been removed.
-- On first sync, different modification times choose the newer copy. A per-endpoint history tracks later changes and skips files changed on both sides. Explicit Upload/Download Active File resolves a file conflict and refreshes its history.
-- Transfer logs and dry runs include uploads, downloads, directory creation and conflicts.
-- Downloads use temporary files and only replace the destination after validation. Symbolic links and file/directory collisions are skipped as conflicts.
-- `.sftp-sync`, `.git` and `.vscode` are excluded from sync. History and temporary files do not trigger the watcher.
-- Teleport uses per-file rsync with fixed safe arguments; Extra Rsync Flags only accepts `--bwlimit=N`. Use Ignore patterns for exclusions.
+**3.1.1.**
 
-### Limitations
-- Remote change detection uses server-reported size and modification time, at one-second precision. Remote edits preserving both may not be detected. First-run files with equal size and time are treated as matching.
-- Teleport requires local `tsh`/`rsync`, remote `rsync`, and GNU `find`/`stat`. No Git installation is needed.
+1. Serialized FTP operations per connection, including directory changes, metadata requests and transfers.
+2. Waited for pending FTP work before closing the connection.
 
-## 3.1.2
+**3.1.0.**
 
-### Added
-- Scrollable live transfer log in the configuration panel for FTP, SFTP, and Teleport sync and dry runs.
-- Automatic scrolling to the log on launch, with output following that pauses when reading earlier entries.
-- Per-file start, completion, failure, and preview entries; streamed rsync output for Teleport.
-
-### Fixed
-- Replace clipped button icons with consistent SVG outlines.
-- Prevent duplicate panel operations during synchronization.
-- Dry runs no longer create the remote root directory.
-
-## 3.1.1
-
-### Fixed
-- Serialize complete FTP/FTPS operations on each connection, including directory changes and transfers, to prevent overlapping-task errors during synchronization.
-- Request FTP file size and modification time sequentially so existing files are not mistaken for missing files after a command collision.
-- Wait for pending FTP operations before closing the connection.
-
-## 3.1.0
-
-### Added
-- Teleport `tsh` auto-discovery and optional auto-install for macOS and Linux.
-- `tsh login` uses `--browser=none`; the SSO link is captured and opened via VS Code with a clipboard fallback.
-- `tsh` binary is searched in `PATH` and common install directories before downloading.
-- Correct CDN URL for the Teleport tarball: `teleport-v${version}-${os}-${arch}-bin.tar.gz`.
-
-### Fixed
-- `ensureTsh` no longer tries to download when a system `tsh` is available.
-- `openTeleportLink` now falls back to clipboard if the browser cannot be opened.
-
-### Known limitations
-- Teleport file sync still depends on `rsync` over `tsh ssh`; `rsync` must be available locally.
-- Windows `tsh` auto-install uses a tarball and is experimental; use WSL or a manual install for best results.
+1. Added tsh discovery and an automatic installation path for macOS and Linux, with experimental Windows support.
+2. Added browser login link capture and clipboard fallback, common binary search locations and the corrected Teleport archive URL format.
+3. Teleport remained dependent on external rsync. Automatic native Windows tooling was not certified.

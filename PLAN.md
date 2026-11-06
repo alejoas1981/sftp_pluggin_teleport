@@ -1,126 +1,23 @@
-# План улучшения SFTP Plugin
+**Historical design plan and current implementation.**
 
-## Цель
-Сделать плагин кроссплатформенным (Windows, macOS, Linux) и убрать обязательные внешние бинарники, кроме `tsh` для Teleport. Работаем над нашим кодом, не копируем reference.
+This file replaces an obsolete migration proposal. It is a source repository design note, not a list of user instructions or promised future features. It is excluded from the VSIX.
 
-## Текущие проблемы
-- `src/sync.ts` спавнит `rsync`, `lftp`, `ssh` через `child_process`. На Windows этих утилит нет, на macOS/Linux их надо ставить отдельно.
-- Синхронизация только целой папки, нет загрузки/скачивания отдельных файлов.
-- Нет поддержки приватных ключей, passphrase, SSH agent, ignore-шаблонов, очереди передач.
-- Webview не содержит полей для новых опций.
-- Тесты завязаны на `child_process`.
+**Implemented in the current 3.2.1 source.**
 
-## Этапы
+1. FTP and explicit FTPS use basic-ftp. SFTP uses ssh2. These modes do not require lftp, system ssh or rsync.
+2. Teleport uses tsh and rsync through child_process. It does not transfer files through ssh2 or tsh proxy ssh. The external rsync dependency remains intentional in this implementation.
+3. SyncEngine plans transfers in both directions with conflict handling and successful transfer history. Automatic deletion is not implemented.
+4. A visual configuration panel stores one active configuration privately for the workspace. Legacy VS Code settings remain a fallback until private configuration exists. Passwords use SecretStorage.
+5. Manual saves and optional automatic upload events feed a versioned persistent upload queue. External changes do not cancel unrelated active uploads. Temporary errors receive bounded retries.
+6. Teleport authentication recovery performs a targeted logout and login and retries a failed operation once. Certificate trust prompts require explicit confirmation.
+7. File analysis supports local hash caching, a reusable validated preview plan and remote scan controls. Task state belongs to the extension rather than the webview.
+8. The active configuration panel assets are under src/webview. The extension runtime is bundled with esbuild and packaged through vsce.
 
-### 1. Зависимости
-Добавить в `package.json` `dependencies`:
-- `ssh2` — SFTP/SSH
-- `basic-ftp` — FTP (современная замена пакета `ftp`)
-- `p-queue` — очередь параллельных трансферов
-- `ignore` — фильтрация файлов
-- `upath` — нормализация путей
-- `@types/ssh2`, `@types/basic-ftp` — devDependencies
+**Earlier proposals that were not implemented.**
 
-Убрать из README и сообщений об ошибках ссылки на `rsync`/`lftp`.
+1. Replacing Teleport rsync with an ssh2 connection through tsh proxy ssh was an earlier alternative, not the current transport.
+2. Removing child_process completely was not implemented because Teleport still launches external tools.
+3. Replacing the full synchronization watcher with a single file upload watcher was not implemented. Start Watching still requests synchronization in both directions. The separate upload queue handles local save and external edit uploads.
+4. Legacy useRsync and sshFlags fields remain in the schema for compatibility but do not select or configure a current transport. Extra Rsync Flags has a restricted Teleport parser.
 
-### 2. Новый transport layer (`src/sync.ts` / `src/remote/`)
-Создать абстракцию `RemoteClient`:
-- `list(dir): Promise<RemoteItem[]>`
-- `put(localPath, remotePath): Promise<void>`
-- `get(remotePath, localPath): Promise<void>`
-- `mkdir(remotePath): Promise<void>`
-- `delete(remotePath): Promise<void>`
-- `test(): Promise<void>`
-- `close(): Promise<void>`
-
-Реализации:
-- `SftpClient` — поверх `ssh2.SFTP`
-- `FtpClient` — поверх `basic-ftp`
-- `TeleportClient` — `tsh` только для логина и `tsh proxy ssh`, затем передача через `ssh2`
-
-`SyncEngine`:
-- Читает списки локальных и удалённых файлов.
-- Сравнивает по размеру и времени.
-- Строит план: upload, download, delete.
-- Выполняет через `p-queue` с контролем concurrency.
-- `dryRun` — печатает план без выполнения.
-
-Удалить `child_process` из `src/sync.ts`.
-
-### 3. Конфигурация (`src/config.ts` + webview)
-Добавить поля:
-- `privateKey`
-- `passphrase`
-- `agent`
-- `ignore` (массив строк)
-- `concurrency`
-- `ftpPassive`
-- `ftpSecure`
-
-Удалить/пометить deprecated:
-- `useRsync`
-- `rsyncFlags`
-- `sshFlags` (заменить на `ssh2` опции)
-
-Обновить `src/webview/config.html` и `src/webview/config.js`:
-- новые поля
-- валидация
-
-Обновить `package.json` `contributes.configuration`.
-
-### 4. Утилиты (`src/utils.ts`)
-- `normalizeRemotePath(path)` — `path.posix`, без лишних слэшей
-- `isIgnored(path, patterns)` — `ignore`
-- `resolvePrivateKey(keyPath)` — раскрытие `~` и `~/.ssh`
-- `joinLocal(...)`, `joinRemote(...)`
-
-### 5. Watcher (`src/watcher.ts`)
-- Оставить `vscode.FileSystemWatcher`.
-- Добавить `p-queue` на `doSync`, чтобы не запускать параллельные синхронизации.
-- При изменении одного файла вызывать `uploadActiveFile` вместо полной папки (по желанию).
-
-### 6. Extension (`src/extension.ts`)
-Новые команды:
-- `sftpPluggin.uploadActiveFile`
-- `sftpPluggin.downloadActiveFile`
-- `sftpPluggin.syncFile`
-- `sftpPluggin.deleteRemote`
-- расширенный `sftpPluggin.testConnection`
-
-Контекстные меню:
-- `explorer/context`: Upload, Download, Sync
-- `editor/title`: Upload/Download
-
-Зарегистрировать в `package.json`.
-
-### 7. Статус и прогресс
-- `src/status.ts`, `src/progress.ts`
-- состояния: `connecting`, `uploading`, `error`
-- прогресс per file от `SyncEngine`
-
-### 8. Тесты
-- Переписать `src/test/*.test.ts`:
-  - мокаем `ssh2` и `basic-ftp`
-  - проверяем `SyncEngine`, `SftpClient`, `FtpClient`
-  - убираем `child_process` моки
-
-### 9. Сборка и документация
-- Проверить `tsconfig.json`.
-- Убедиться, что `ssh2` не ломается при webpack-сборке (optional/native deps).
-- Обновить `README.md`.
-- Подготовить `vsce package`.
-
-## Порядок выполнения
-1. Зависимости + `src/sync.ts` transport layer.
-2. `src/config.ts` + webview.
-3. `src/utils.ts` + `src/watcher.ts`.
-4. `src/extension.ts` + `package.json` commands.
-5. Статус/прогресс.
-6. Тесты.
-7. Сборка + README.
-
-## Критерий готовности
-- `npm run compile` проходит без ошибок.
-- SFTP работает без `rsync`/`ssh`/`lftp` на Windows, macOS, Linux.
-- FTP работает без `lftp`.
-- Teleport работает с установленным `tsh` и `ssh2`.
+Current user instructions are in README.md. Development instructions are in CONTRIBUTING.md. Manual release checks are in RELEASE_CHECKLIST.md. No additional implementation is authorized by this historical note.

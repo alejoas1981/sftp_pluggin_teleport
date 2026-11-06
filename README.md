@@ -1,324 +1,149 @@
-# FTP / SFTP / Teleport Sync for VS Code
+**SFTP Plugin.**
 
-A single VS Code extension that keeps your local project folder in sync with a remote host — no matter which transport your team or server uses. Pick **FTP**, **SFTP over SSH**, or **Teleport (`tsh`)**, fill the visual configuration panel, and let the extension handle the rest: secure credential storage, incremental transfers, upload-on-save, continuous watching, dry-run preview, and status-bar feedback.
+Version 3.2.1 supports FTP, explicit FTPS, SFTP over SSH and Teleport in VS Code desktop. It provides a visual configuration panel, synchronization previews, transfers in both directions and a persistent queue for local uploads.
 
-## Why this plugin
+**Requirements and installation.**
 
-Most teams end up with a mix of remote environments: legacy boxes that only speak FTP, modern cloud hosts reachable over plain SSH/SFTP, and corporate infrastructure locked behind Teleport. FTP and SFTP run through pure Node.js libraries (`ssh2`, `basic-ftp`). Teleport mode wraps `tsh` and `rsync` for incremental transfers.
+1. Use VS Code 1.80 or later with a desktop extension host. Browser only VS Code is not supported by this Node.js extension.
+2. FTP, FTPS and SFTP use bundled JavaScript libraries and require no external transfer commands.
+3. Teleport requires local tsh and rsync, plus remote rsync and GNU find and stat. The remote command environment must support the shell commands used by the adapter.
+4. Install the VSIX through the Extensions view using Install from VSIX. The package filename for this version is sftp-pluggin-3.2.1.vsix.
+5. Teleport on Windows requires a compatible tool environment. Running the extension inside a VS Code WSL extension host with Linux tsh and rsync avoids mixing Windows and Unix paths. Native Windows rsync combinations are not certified by the automated tests.
 
-- **One UI, three transports.** Switch between FTP, SFTP, and Teleport from a dropdown. The last selected mode is remembered.
-- **Visual config panel.** No need to hand-edit `settings.json`; the `SFTP: Open Configuration` webview stores configuration privately for this workspace when you click **Save**.
-- **Cross-platform.** Works on Windows, macOS, and Linux. FTP and SFTP need no external tools; Teleport mode requires `tsh` and `rsync` (see Windows and Teleport setup).
-- **Incremental sync.** Compares local and remote file lists and transfers changed files with bounded parallel workers; FTP/FTPS uses a pool of separate connections.
-- **Sync on save.** Upload all locally changed project files after a manual `Ctrl+S` or auto-save.
-- **File-level commands.** Upload, download, sync, or delete the remote copy of the active file from the Command Palette or editor title.
-- **Continuous watching.** Run `SFTP: Start Watching` to sync automatically when files change, with a configurable debounce.
-- **Dry run.** Preview changes without writing project files or sync history, then reuse the validated plan in Sync Now.
-- **Secure credentials.** Passwords are stored in VS Code `SecretStorage`; saved form values live in VS Code workspace state outside the project.
-- **Status bar.** Always see the current state: `logging in`, `syncing`, `watching`, `ready`, or `error`.
-- **One active configuration.** The extension keeps a single configuration at a time. To switch to a different server or mode, click **Delete Config** in the webview and save a new one. Your password stays in VS Code `SecretStorage` until you overwrite it.
+**Configure without editing JSON.**
 
-## What you need
+1. Open SFTP: Open Configuration from the Command Palette.
+2. Select FTP, SFTP or Teleport and enter the connection fields. Set Local path to the absolute project directory and Remote path to the intended server directory. The panel initially fills Local path from the first workspace folder when it is empty.
+3. FTP and FTPS need the FTP host and user. Enable FTP Secure for explicit TLS when required. Plain FTP does not encrypt credentials or file contents.
+4. SFTP needs the SSH host and remote user. Supply a private key, SSH agent or password as required by the server. Key paths support a leading tilde. Private key, passphrase and agent settings apply to SFTP, not Teleport.
+5. Teleport needs the proxy host, Teleport user, target node and remote operating system user. Cluster selection is optional. A proxy can include its port. Teleport authentication uses tsh rather than the SFTP key fields.
+6. For password authentication, select Save password before saving. Test Connection can use a password currently entered in the form, but later commands load the saved SecretStorage password. An empty password field does not erase an existing saved password.
+7. Click Save before running Dry Run or Sync Now. These actions use saved configuration. Test Connection uses the values currently in the form. In Teleport mode it checks tsh session status rather than proving access to the target node or remote path.
+8. Run Dry Run and review the proposed operations before Sync Now. For a first import, use an empty local directory.
+9. To change connection values, edit the panel and save again. If the mode selector is disabled, use Delete Config to unlock it in that panel, then choose the mode and save. Delete Config clears fields associated with the selected mode. It does not delete the saved password, old settings files, synchronization history or pending upload journals.
 
-- Visual Studio Code 1.80+ or Devin Desktop
-- **Teleport mode only:** the `tsh` CLI in your `$PATH`
-- **Teleport mode on Windows:** `rsync` and `tsh` must be available; see [Windows and Teleport](#windows-and-teleport)
+Normal connection setup does not require settings.json. The panel saves one active configuration privately for the workspace. It does not write project settings or gitignore files.
+
+**Settings precedence and optional JSON.**
 
-No other external tools are required for FTP and SFTP. FTP and SFTP transfers run through pure Node.js libraries.
+Before a private configuration has been saved, the extension reads the registered sftpPluggin settings from VS Code. Once private configuration exists, that complete saved configuration takes precedence for connection fields, Ignore rules, concurrency and editor button preferences. Changing those connection values in settings.json will not override the private configuration. Use the panel instead.
 
-## How it works
+The uploadOnSave and uploadOnAutoSave preferences are read directly from VS Code Settings even after private connection configuration is saved. Change them through the Settings editor by searching for their setting names. Manual upload after saving defaults to enabled. Upload after automatic saves or external workspace changes defaults to disabled.
 
-1. **Activation.** The extension activates on `onStartupFinished` and reads private workspace configuration, falling back to existing `sftpPluggin.*` settings.
-2. **Mode selection.** `sftpPluggin.mode` is `ftp`, `sftp`, or `teleport`. The webview sets and persists this value.
-3. **Connection ready-up.**
-   - **Teleport:** the extension runs `tsh status`; if the session is missing or expired it runs `tsh login --proxy=<teleportHost> --user=<teleportUser> [--cluster=<teleportCluster>]`, captures the browser link, and opens it with `vscode.env.openExternal`.
-   - **SFTP:** `ssh2` connects to `<sftpHost>:<sftpPort>` using password, private key, passphrase, or SSH agent.
-   - **FTP:** `basic-ftp` connects to `<ftpHost>:<ftpPort>` with optional explicit TLS.
-4. **Two-way transfer.** The sync engine lists both trees. Remote-only files and directories are downloaded; local-only files and directories are uploaded. On the first run, modification times select the newer version. Later runs use history to detect changes on both sides and skip conflicts. Files are never deleted automatically.
-5. **Sync on save.** Save events queue a batch upload of locally changed files when `uploadOnSave` or `uploadOnAutoSave` is enabled; this does not run two-way synchronization.
-6. **File watcher.** `SFTP: Start Watching` watches `localPath/**` and runs the sync engine after `debounceMs`.
-7. **Status bar.** The status bar shows the current operation and result.
+The source file sample-config.json is an optional Teleport settings reference. The extension does not import that file automatically. Copy its entries into VS Code Settings only when deliberately using the settings fallback. Use an absolute localPath. The extension does not expand workspaceFolder or environment variable placeholders in configuration paths. Relative local roots are not resolved consistently across commands and should be avoided.
 
-## Importing a remote project and resolving conflicts
+There is no registered sftpPluggin.password setting. Enter passwords through the panel and store them in SecretStorage. Do not add a password field to settings.json. Private keys and passphrases entered into other configuration fields are ordinary saved values, not SecretStorage secrets.
 
-Open an empty local folder, configure the remote project directory, then use **Dry Run** followed by **Sync Now**. The extension downloads the remote files and creates local directories. Git is not required. User Ignore patterns apply in both directions; `.git`, `.vscode`, and `.sftp-sync` are always excluded.
+**Two directions and conflict detection.**
 
-Sync never interprets a missing file as permission to delete its other copy. Removing a file on one side restores it on the next sync. Use the explicit Delete Remote File command only when you intend to delete a server file; also remove its local copy if you do not want it uploaded again.
+Sync Now scans local and remote trees. Files missing on one side are copied from the other. On the first run the newer modification time wins when comparable. Equal size and time are treated as matching. Different files with equal or unavailable times can be conflicts. Subsequent runs use successful transfer history to detect changes on both sides and skip conflicting files.
 
-The first run compares modification times. Different files with equal or unavailable times are reported as conflicts; equal size and time are treated as matching. Keep server and local clocks accurate. After a successful sync, VS Code extension storage holds per-project, per-endpoint history without credentials. Keep this private history to retain conflict detection. Local changes are checked using SHA-256; remote changes use server size and modification time at one-second precision. Remote changes preserving both size and time may not be detected.
+Local content comparison uses SHA256. Remote comparison uses size and modification time with one second precision. Remote edits preserving both may be missed. Keep clocks accurate. Sync Active File applies the synchronization policy to the active file. Explicit Upload and Download choose a source and overwrite the destination, updating history after success.
 
-When both copies changed, the log lists a conflict and neither copy is overwritten. Open the local file and choose **SFTP: Upload Active File** to keep the local version or **SFTP: Download Active File** to keep the server version. These explicit commands replace the chosen destination and refresh the history. File/directory collisions and symbolic links require manual handling.
+Sync never automatically deletes files. A deletion on one side can be restored by the other side during the next synchronization. Delete Remote File explicitly deletes the server copy of the active file. Remove the local copy too if it must not be uploaded again. Symbolic links and file versus directory collisions require manual handling.
 
-Downloads are staged locally so an interrupted transfer does not truncate the current file. Dry Run writes neither project files nor sync history. Watching responds to local filesystem events; use Sync Now to fetch server changes when no local event occurs.
+Ignore rules apply in both directions and to queued uploads. The built in exclusions include .git, .vscode and .sftp-sync. The plugin does not automatically exclude node_modules or environment files. Add project specific exclusions before transferring.
 
-Teleport follows the same planner and uses rsync without `--delete`. Full synchronization reads the complete remote tree through one recursive `tsh ssh` command. Save-triggered uploads pass a null-delimited file list to one rsync session, so large branch updates do not create thousands of command arguments. Rsync's delta-transfer algorithm sends changed blocks. The mode requires local `tsh` and `rsync`, remote `rsync`, and GNU `find`/`stat`. Extra Rsync Flags accepts `--bwlimit=N`, `--exclude PATTERN`, and `--exclude=PATTERN`, including quoted patterns. Legacy exclusions are merged with Ignore patterns before local scanning and planning; only the bandwidth flag is passed to rsync. Unsupported flags fail before connecting.
+Dry Run does not transfer files or record successful transfers. It may update private hash caches and migrate recognized legacy history. A matching prepared plan can be validated and reused once for up to 30 minutes. Changed planned files stop execution. New paths created after a preview require another analysis. Plans and active task state do not survive extension host restarts.
 
-## Synchronization progress and parallel transfers (3.2.1)
+**Local upload queue and AI edits.**
 
-The progress panel reports upload time, download time, and complete session time. Upload and download show `pending` while analysis is running, then advance live during active transfers. Final results retain all three values in milliseconds so performance can be compared between releases and environments.
+1. Document saves and observed workspace file events record pending paths. Repeated changes to a path update its queued version.
+2. With uploadOnSave enabled, a manual save such as Ctrl+S sends the accumulated eligible local changes. This is an upload operation. It intentionally overwrites remote versions and does not perform conflict detection or downloads.
+3. With uploadOnAutoSave enabled, editor automatic saves and external workspace edits also start the queue after debounce. This preference does not enable VS Code editor Auto Save.
+4. Disk edits do not cancel an active upload. If a file changes while its version is being sent, it remains pending for a subsequent pass. Dirty open project documents are saved before a batch starts.
+5. Each batch examines queued paths and relevant server metadata without recursively scanning the remote project. Successful files retain history even if a later transfer fails. Unchanged successful versions are skipped on later attempts.
+6. Temporary failures identified by the queue receive up to three retries after delays of 1, 2 and 4 seconds. Permanent errors, exhausted retries and manual cancellation leave paths available for a later request. A new save or explicit retry starts a fresh retry budget.
+7. Run SFTP Retry Pending Uploads to request another batch without a full synchronization. The status bar reports pending files or the reason an upload paused.
+8. Pending paths are saved in private VS Code workspace state separately for each connection destination. After restart, automatic resumption occurs when uploadOnAutoSave is enabled. Otherwise use a manual save or the retry command. Removed local files do not trigger remote deletion in this mode.
+9. Only observed changes enter this queue. It does not discover arbitrary changes made while the extension was inactive. Files outside open workspace folders are not watched by the upload event watcher. Use an explicit file command or a reviewed synchronization for unobserved changes.
 
-### Five synchronization fixes
+Start Watching is a separate feature. It watches the configured local path and requests complete synchronization in both directions after local file events. It does not poll the server for remote changes and is not equivalent to automatic queued uploading. Use Stop Watching to stop that watcher. Upload preferences continue to govern the separate upload queue.
 
-| Reported problem | Implemented behavior |
-| --- | --- |
-| Dry Run appears frozen during a long remote scan. | Stages, current path, local/remote file counts, directory count, and elapsed time are published every 250 ms. Unknown totals use an indeterminate indicator rather than an invented percentage. |
-| Sync repeats the entire Dry Run. | A matching prepared plan is validated and reused for up to 30 minutes without another recursive directory scan. Sync without a plan performs its own analysis. |
-| Status bar advances while the Webview loader is frozen. | Both read the same extension-owned task state and percentage. Errors retain the last achieved progress instead of showing a false 100%. |
-| Switching tabs loses the progress panel and file log. | The Webview requests the current task when it loads and regains focus. It restores progress, logs, and the result without starting another sync. |
-| Closing the Webview interrupts synchronization. | Closing the panel only detaches its observer. It does not cancel the task or close its transport clients. Reopening during execution restores the active task; reopening afterward restores its result. |
+**Teleport login and recovery.**
 
-**Closing the configuration tab is not cancellation.** Use **Cancel Transfer** in the configuration panel or **SFTP: Cancel Active Transfer** from the Command Palette to stop the active transfer. Closing VS Code or restarting the extension host is different: in-memory task state and prepared plans do not survive that restart.
+The extension searches for an installed tsh in PATH and common locations before using its private installation. If none is found, it attempts to download Teleport 18.10.0 from the Teleport CDN. It does not install rsync. Prefer a tsh version compatible with the server. Automatic installation on native Windows is experimental.
 
-### Plan reuse and freshness
+Login uses the configured proxy and user, plus an optional cluster argument. The browser link is opened through VS Code with a clipboard fallback. Session lifetime is controlled by the Teleport server. Successful session checks are cached for up to 60 seconds.
 
-Dry Run retains one plan with an ID, creation time, configuration/selection fingerprint, operations, and file metadata. Sync with identical settings validates planned local content hashes and remote size/modification metadata before starting transfers. Changed planned files or directory targets stop execution and require a new analysis. File preconditions are checked again immediately before transfer; downloads are checked again before replacing the local destination.
+A recognized certificate trust or expired session error during a transfer triggers one targeted logout and login, then one retry of that operation. Browser authentication or MFA can still be required. A repeated authentication failure stops the operation. A certificate trust question emitted by tsh is shown for explicit confirmation. The extension does not silently accept unknown certificates or disable TLS verification. Login has a two minute timeout.
 
-The plan is consumed once, including a failed attempt. Changing settings, expiration, or an extension-host restart causes a fresh scan. The log explains reuse or expiration/configuration mismatch. Validation still requires metadata requests; unchanged local hashes can be reused. Checks immediately before transfers read local contents again, so validation is not instantaneous. New paths created after the preview require another Dry Run; remote content changes preserving both size and modification time may not be detected.
+Extra Rsync Flags supports only bandwidth limits and legacy exclusion patterns. Unsupported options are rejected before connecting. Legacy exclusions are merged with Ignore rules. The plugin does not pass deletion or arbitrary shell options to rsync. Teleport batch uploads stream file lists to one rsync session. Full Teleport analysis obtains the remote tree through one recursive command rather than a connection per directory.
 
-### Progress and state ownership
+**Commands.**
 
-The shared state includes task ID, operation type, phase, file counters, completed-file bytes, current path, elapsed time, result, and errors. Scanning reports stages without a percentage. Transfer progress is weighted by bytes of completed files; it does not measure bytes currently streaming within one file. For zero-byte work the engine uses completed operations. Progress stays below 100% until the operation, history persistence, and transport cleanup have succeeded. A completed analysis is not a completed file transfer; conflicts remain visible as a warning.
+1. SFTP: Open Configuration. Open the connection form and transfer progress panel. Command identifier sftpPluggin.openConfig.
+2. SFTP: Sync Now. Synchronize the configured project in both directions. Command identifier sftpPluggin.syncNow.
+3. SFTP: Dry Run. Preview synchronization and prepare a reusable plan. Command identifier sftpPluggin.dryRun.
+4. SFTP: Start Watching. Start the separate local watcher for complete synchronization. Command identifier sftpPluggin.startWatching.
+5. SFTP: Stop Watching. Stop the complete synchronization watcher. Command identifier sftpPluggin.stopWatching.
+6. SFTP: Cancel Active Transfer. Cancel the active transport while retaining pending upload paths. Command identifier sftpPluggin.cancelTransfer.
+7. SFTP: Teleport Login. Ensure the configured Teleport session is available. Command identifier sftpPluggin.teleportLogin.
+8. SFTP: Test Connection. Test the configured connection or Teleport session status. Command identifier sftpPluggin.testTeleport.
+9. Upload. Upload the active editor file and overwrite its server copy. Command identifier sftpPluggin.uploadActiveFile.
+10. Download. Download the active editor file and overwrite its local copy. Command identifier sftpPluggin.downloadActiveFile.
+11. SFTP: Sync Active File. Synchronize the active editor file with conflict detection. Command identifier sftpPluggin.syncFile.
+12. SFTP: Delete Remote File. Delete the server copy corresponding to the active editor file. Command identifier sftpPluggin.deleteRemote.
+13. SFTP Retry Pending Uploads. Request another batch of pending uploads. Command identifier sftpPluggin.retryUploads.
 
-The panel restores up to 500 recent log entries, each limited to 2000 characters in task state. The Output channel receives the full plain-text log. These limits bound the retained UI log, not the memory required for the file inventory and plan.
+Upload and Download editor title buttons are hidden by default. Enable them in the configuration panel. Explorer context actions currently operate on the active editor file rather than the file selected only by the context menu. Open the intended file before invoking them.
 
-`src/sync-task.ts` owns observable state independently of the Webview. `src/sync-engine.ts` owns planning, validation, and execution. `src/sync.ts` owns transport clients and the FTP pool. `src/extension.ts` connects commands, status bar, and panel subscriptions. `src/webview/config.js` renders snapshots and requests fresh state. Disposed-panel exceptions and rejected message promises cannot propagate into the transfer loop. Duplicate full-sync commands are rejected, and configuration/test actions from another panel are blocked while a full sync is active.
+**Configuration reference.**
 
-### Parallel transfers and log colors
+These defaults are the values declared to VS Code. Required connection strings default to empty. Saved panel values take precedence as described above. All names below include the sftpPluggin prefix used by VS Code Settings.
 
-Set **Parallel transfers** (`sftpPluggin.concurrency`) to `1` for one file at a time or `2`-`16` for multiple files; the default is `4`. FTP/FTPS uses separate connections and serializes commands within each connection. Passive/TLS settings apply to each client. Server connection limits may require a lower value. Directory scanning has its own parallelism setting. Prerequisite directory creation remains sequential. SFTP and Teleport also support bounded parallel scanning and transfers.
-
-Transfer workers are bounded instead of creating one queued promise per file. After an error, no further queued files are started; already active workers settle before clients close and the task reports failure. Successful file history is retained for subsequent runs.
-
-In the Webview log, transfer starts are **blue**, completed transfers **green**, and failed transfers **red**, using VS Code theme colors. Text labels remain available independently of color, and file names are inserted as text rather than HTML. The Output channel is not colorized.
-
-### Remaining safety limits
-
-Downloads use a local temporary file so an interrupted download does not truncate an existing destination. Uploads still write directly to the remote destination: an interrupted upload can leave a partial remote copy, although no successful history is recorded for that failed transfer. Atomic remote publication was not added. Metadata checks do not lock files against simultaneous external writers.
-
-### Manual release checks
-
-Use a test copy of a project with nested and empty directories, many small files, and at least one large file. Start with an empty local folder and verify Ignore rules.
-
-1. Run Dry Run and confirm changing counters, paths, and elapsed time throughout the scan.
-2. Immediately run Sync and verify `Using Dry Run plan` in the log; metadata validation is expected, another recursive scan is not.
-3. Repeat Dry Run, change a planned local file, and confirm Sync refuses the stale plan before transfers. Repeat with a remote size/time change, then analyze again.
-4. Restart the extension host and run Sync directly to verify analysis without a prepared plan.
-5. Compare status-bar and Webview percentages during transfers. A large in-flight file may hold the percentage steady until completion; elapsed time and the path remain visible.
-6. Switch tabs repeatedly and confirm that the active progress and file log return.
-7. Close the Webview during a long transfer and verify continued activity through local files or the server log. Reopen before completion, then repeat and reopen after completion. No new task should start automatically.
-8. Interrupt the connection during download. Confirm a real error, no false success, and no replacement of an existing local file by a partial download. Restore connectivity and run again.
-9. Complete a second synchronization, then repeat the full workflow with a large directory tree.
-10. Compare concurrency `1` and `4` using server transfer logs. Repeat with FTP, explicit FTPS/passive settings, and SFTP. Verify the three log colors in the selected VS Code theme.
-
-## Faster scans and private storage (3.2.1)
-
-The first analysis reads local file contents to compute SHA-256 hashes. Subsequent analyses reuse hashes when size, nanosecond modification/change times, inode and device identity match. Cached hashes expire after 24 hours. Enable **Verify all local file contents** for a complete content check. The panel shows reused/read counters; the log records local and remote scan durations. The cache is an optimization, separate from the successful synchronization history used for conflict detection. A corrupt cache is rebuilt.
-
-**Parallel directory scans** defaults to `4` and accepts `1`–`16` for FTP/FTPS, SFTP and Teleport. FTP uses at most the larger of scan concurrency and transfer concurrency in separate connections. Reduce both settings when a server limits connections. Remote directories are freshly listed on every new analysis so additions and deletions can be found. Remote file contents are not downloaded for comparison; size and modification time are used. A remote cache cannot reliably detect arbitrary external changes without fresh server requests. Acceleration depends on tree shape, latency and server limits; a real-server speedup is not guaranteed.
-
-History and local hash caches live beneath VS Code's `ExtensionContext.globalStorageUri`, separated by canonical project path and endpoint. Saved form configuration lives in `workspaceState`; passwords remain in `SecretStorage`. No new `.sftp-sync`, `.vscode/settings.json`, or `.gitignore` is created in the project. Dry Run may update its private hash cache but does not record successful transfers.
-
-Existing recognized `.sftp-sync/<endpoint-hash>.json` history is migrated: copy, verify, then remove the verified old file. Conflicting old history is archived privately; unknown files and unfinished legacy temporary files are preserved. The old directory is removed only when empty. Legacy exclusions remain for compatibility.
-
-Downloads are staged outside the project and workspace, then atomically renamed on the same filesystem. When extension storage is on another volume, staging uses a sibling outside the enclosing workspace/Git repository on the destination volume. If no safe location exists, the download fails instead of truncating the destination or creating internal files inside the project. Temporary staging is cleaned after success or failure. External processes can still change files between checks.
-
-## Windows and Teleport
-
-Teleport mode uses `rsync` over `tsh ssh`. On Windows neither `rsync` nor `tsh` is installed by default. Choose one of the following setups.
-
-### Option 1: WSL (recommended)
-
-1. Install WSL2 and a Linux distribution (for example Ubuntu).
-2. Inside WSL install `rsync`:
-   ```bash
-   sudo apt update && sudo apt install -y rsync
-   ```
-3. Install the Teleport `tsh` binary for Linux inside WSL, or let the extension download it on first use.
-4. Open the project with the **VS Code Remote - WSL** extension so the SFTP plugin runs inside WSL and can call `rsync` and `tsh` directly.
-
-### Option 2: Cygwin or MSYS2
-
-1. Install [Cygwin](https://cygwin.com/) or [MSYS2](https://www.msys2.org/) and include the `rsync` package.
-2. Add the `bin` directory (for example `C:\cygwin64\bin` or `C:\msys64\usr\bin`) to your system `PATH`.
-3. Install the Teleport `tsh.exe` binary for Windows and add its directory to `PATH`.
-4. Restart VS Code.
-
-### Option 3: Native rsync port
-
-1. Install a native Windows `rsync` port such as `cwRsync` and add it to `PATH`.
-2. Install `tsh.exe` for Windows and add it to `PATH`.
-3. Restart VS Code.
-
-## Install the extension
-
-1. Build or download `sftp-pluggin.vsix`.
-2. Open VS Code / Devin Desktop.
-3. Go to the **Extensions** view.
-4. Click the `...` menu and choose **Install from VSIX...**.
-5. Select the `.vsix` file.
-
-## Full configuration reference
-
-The configuration panel saves values in private VS Code workspace state, outside the project. Existing `sftpPluggin.*` settings remain a fallback until a private configuration is saved. After saving, edit connection values in the panel; private values take precedence. Upload-on-save and editor-button preferences still use VS Code Settings. The extension does not create or modify project settings files or `.gitignore`. User-managed existing settings files remain untouched.
-
-| Setting | Type | Default | Description |
-|---------|------|---------|-------------|
-| `sftpPluggin.mode` | `string` | `ftp` | Transport mode: `ftp`, `sftp`, `teleport`. Inferred from `useTeleport` for existing configs. |
-| `sftpPluggin.teleportHost` | `string` | `undefined` | Teleport proxy host, e.g. `teleport.example.com` |
-| `sftpPluggin.teleportUser` | `string` | `undefined` | Your Teleport username |
-| `sftpPluggin.teleportCluster` | `string` | `undefined` | Teleport cluster name, e.g. `main` |
-| `sftpPluggin.sftpHost` | `string` | `undefined` | Target SSH/SFTP host (also used as the Teleport target) |
-| `sftpPluggin.sftpUser` | `string` | `undefined` | Username on the target host |
-| `sftpPluggin.sftpPort` | `number` | `22` | SSH/SFTP port |
-| `sftpPluggin.ftpHost` | `string` | `undefined` | FTP server host, e.g. `ftp.example.com` |
-| `sftpPluggin.ftpUser` | `string` | `undefined` | FTP username |
-| `sftpPluggin.ftpPort` | `number` | `21` | FTP port |
-| `sftpPluggin.ftpPassive` | `boolean` | `true` | Use passive mode for FTP |
-| `sftpPluggin.ftpSecure` | `boolean` | `false` | Use FTPS (TLS) — encrypted FTP connection; enable if the server requires `AUTH TLS` |
-| `sftpPluggin.remotePath` | `string` | `undefined` | Destination directory on the remote host, e.g. `/home/user/project` |
-| `sftpPluggin.localPath` | `string` | `undefined` | Local directory to sync from; can be absolute or relative to the first workspace folder |
-| `sftpPluggin.identity` | `string` | `undefined` | **Deprecated.** Use `privateKey` instead. |
-| `sftpPluggin.privateKey` | `string` | `undefined` | SSH private key path or key content for `sftp`/`teleport` |
-| `sftpPluggin.passphrase` | `string` | `undefined` | Passphrase for an encrypted private key |
-| `sftpPluggin.agent` | `string` | `undefined` | SSH agent socket or `pageant` on Windows |
-| `sftpPluggin.password` | `string` | `undefined` | Stored in VS Code `SecretStorage`; used for FTP and password-based SFTP. Hidden from `settings.json` |
-| `sftpPluggin.ignore` | `string[]` | `[]` | Patterns to ignore during sync (e.g. `.git`, `node_modules`) |
-| `sftpPluggin.concurrency` | `integer` | `4` | Parallel file transfers: `1` for sequential, `2`-`16` for simultaneous transfers; FTP/FTPS uses separate connections |
-| `sftpPluggin.scanConcurrency` | `integer` | `4` | Parallel remote directory listings and prepared-plan validation, from `1` to `16`, for all transports |
-| `sftpPluggin.verifyContents` | `boolean` | `false` | Bypass the local hash cache and read all local file contents during analysis |
-| `sftpPluggin.debounceMs` | `number` | `300` | Milliseconds to wait after a watcher event before syncing |
-| `sftpPluggin.uploadOnSave` | `boolean` | `true` | Upload all local changes after manual save; local copies are authoritative |
-| `sftpPluggin.uploadOnAutoSave` | `boolean` | `false` | Upload all local changes after auto-save or workspace filesystem edits; local copies are authoritative |
-| `sftpPluggin.showUploadButton` | `boolean` | `false` | Show the `SFTP: Upload Active File` button in the editor title |
-| `sftpPluggin.showDownloadButton` | `boolean` | `false` | Show the `SFTP: Download Active File` button in the editor title |
-
-## Sample `settings.json`
-
-### Teleport
-
-```json
-{
-  "sftpPluggin.mode": "teleport",
-  "sftpPluggin.teleportHost": "teleport.example.com",
-  "sftpPluggin.teleportUser": "your-teleport-user",
-  "sftpPluggin.teleportCluster": "main",
-  "sftpPluggin.sftpHost": "sftp-node",
-  "sftpPluggin.sftpUser": "your-sftp-user",
-  "sftpPluggin.privateKey": "~/.tsh/keys/...",
-  "sftpPluggin.remotePath": "/home/your-sftp-user/project",
-  "sftpPluggin.localPath": "${workspaceFolder}/project",
-  "sftpPluggin.ignore": [".git", "node_modules"],
-  "sftpPluggin.concurrency": 4,
-  "sftpPluggin.debounceMs": 300,
-  "sftpPluggin.uploadOnSave": true,
-  "sftpPluggin.uploadOnAutoSave": false
-}
-```
-
-### SFTP over SSH
-
-```json
-{
-  "sftpPluggin.mode": "sftp",
-  "sftpPluggin.sftpHost": "sftp.example.com",
-  "sftpPluggin.sftpUser": "deploy",
-  "sftpPluggin.privateKey": "~/.ssh/id_rsa",
-  "sftpPluggin.remotePath": "/var/www/project",
-  "sftpPluggin.localPath": "${workspaceFolder}",
-  "sftpPluggin.ignore": [".git", "node_modules"],
-  "sftpPluggin.concurrency": 4,
-  "sftpPluggin.uploadOnSave": true
-}
-```
-
-### FTP
-
-```json
-{
-  "sftpPluggin.mode": "ftp",
-  "sftpPluggin.ftpHost": "ftp.example.com",
-  "sftpPluggin.ftpUser": "deploy",
-  "sftpPluggin.ftpSecure": false,
-  "sftpPluggin.remotePath": "/public_html/project",
-  "sftpPluggin.localPath": "${workspaceFolder}",
-  "sftpPluggin.ignore": [".git"],
-  "sftpPluggin.concurrency": 4,
-  "sftpPluggin.uploadOnSave": true
-}
-```
-
-## Step-by-step usage
-
-1. Open `SFTP: Open Configuration` from the Command Palette.
-2. Select the transport mode from the **Connection Mode** dropdown and fill the visible fields.
-3. Click **Save**. Configuration values are saved in private VS Code workspace state. Passwords are stored separately in SecretStorage when requested.
-4. Use **Login to Teleport** / **Test Connection** when in `teleport` mode, or jump straight to **Dry Run** / **Sync Now**.
-5. Press `Ctrl+S` in any file inside `localPath` to synchronize that file with conflict detection.
-6. Use the editor-title buttons or Command Palette to **Upload**, **Download**, **Sync**, or **Delete Remote** for the active file.
-7. To synchronize on local filesystem changes, run `SFTP: Start Watching`.
-8. To switch to a different server or mode, click **Delete Config** in the webview, then save a new configuration. The stored password is preserved unless you overwrite it.
-
-## Commands
-
-- `SFTP: Open Configuration`
-- `SFTP: Teleport Login`
-- `SFTP: Test Connection`
-- `SFTP: Sync Now`
-- `SFTP: Dry Run`
-- `SFTP: Start Watching`
-- `SFTP: Stop Watching`
-- `SFTP: Upload Active File`
-- `SFTP: Download Active File`
-- `SFTP: Sync Active File`
-- `SFTP: Delete Remote File`
-
-The `SFTP: Upload Active File` and `SFTP: Download Active File` buttons on the editor title can be shown or hidden with the `sftpPluggin.showUploadButton` and `sftpPluggin.showDownloadButton` settings.
-
-## Testing
-
-```bash
-npm test
-```
-
-The suite covers configuration, two-way synchronization, conflict detection, Ignore rules, partial downloads, prepared-plan reuse and invalidation, progress, Webview restoration and disposal, bounded logs, FTP/FTPS connection concurrency, SFTP/Teleport adapters, and the watcher. A 1200-file import from a prepared plan and a subsequent sync are exercised with local files and a model remote server.
-
-The 3.2.1 automated suite covers the behavior described above. Network and VS Code APIs are mocked in these tests: passing them does not certify a live server, a TLS handshake, or the real VS Code Webview lifecycle. The manual checks below remain necessary before release.
-
-```bash
-npm run compile
-npm run build:extension
-```
-
-The package is generated as `build/sftp-pluggin-3.2.1.vsix`.
-
-The release build bundles the extension runtime and JavaScript dependencies into `out/extension.js`. Source files, tests, development dependencies, and build-only files are excluded from the VSIX.
-
-## Notes on the Teleport session
-
-A Teleport session is valid for about 10 hours. The extension checks the session before every sync, so when it expires the next `Ctrl+S`, `Sync Now`, or watcher-triggered sync automatically starts `tsh login` again and opens the browser. You only need to authenticate again in the browser.
-
-## Security
-
-- Configuration is stored in workspace `settings.json`. Review it before sharing: `passphrase` and inline `privateKey` content are configuration fields and may contain secrets. Prefer a key path or SSH agent.
-- Passwords are stored in VS Code `SecretStorage` and never appear in `settings.json`.
-- The `password` field in the webview is a secret input; leaving it empty keeps the existing stored password.
-
-## Contributing and license
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) and [LICENSE](LICENSE).
-
-## Upload all local changes on save (3.2.1)
-
-If a branch switch, pull, save, or external tool changes the working tree during an automatic upload, the obsolete transport is cancelled and the debounced queue restarts from the latest local snapshot. This expected restart is shown as a warning rather than a transfer failure. When automatic upload is disabled, the stale transfer is cancelled and the latest paths remain queued until the next manual save.
-
-With `sftpPluggin.uploadOnSave: true`, a manual save queues an upload of all locally changed files under the configured local path, including edits made to other files by an IDE or external tool. With `sftpPluggin.uploadOnAutoSave: true`, automatic document saves and file creation/change events inside the open workspace trigger the same queue. Files outside the open workspace are not watched automatically; a document-save event or saving a dirty open document is needed to queue them. Neither option runs a full remote directory scan. The separate Start Watching command retains its two-way synchronization behavior.
-
-Before uploading, the extension saves other dirty, file-backed documents in the configured project. Ignored paths, other projects and untitled documents are excluded. A failed document save stops the batch. VS Code controls its own Auto Save timing; this extension setting controls uploads and does not enable the editor's Auto Save preference.
-
-Each batch scans only paths queued by document saves and filesystem creation/change events, using the private hash cache and successful transfer history for this endpoint. Filesystem changes are queued even with automatic uploading disabled, so the next manual save can send the whole batch. It checks remote metadata only for candidates and their parents, then uploads with the configured transfer concurrency. No downloads or automatic deletions occur. Local versions intentionally replace remote versions, even if the server was edited separately. Use Sync Now instead when you need two-way conflict detection.
-
-Missing history does not mean that every project file changed. Only observed paths enter automatic uploads. An observed file without history is uploaded even when remote size/time match, since matching metadata cannot prove identical contents. Files changed before the extension was active are not automatically discovered by this event queue; use a reviewed Sync Now or an explicit file upload for those changes. A deleted local file does not delete or restore its remote copy in this mode.
-
-Save bursts are debounced using `debounceMs`. A save arriving during a transfer queues another pass; full synchronization and active-file operations defer queued uploads. Successful files retain their history if another file fails. Failures appear in the log and notification; the next save retries outstanding differences without an automatic retry loop. Closing the configuration panel does not stop the queue. Restarting VS Code discards pending events. Re-save the affected files or use a reviewed Sync Now for changes made while the extension was inactive. Successful transfer history persists, so a repeated save does not resend unchanged contents.
-
-After successful completion, both progress indicators show completion for 1.5 seconds, then return to idle: the Webview loader is cleared and hidden, and the status bar shows Ready. Logs and the final result remain in task history. Reopening the panel does not revive a completed loader. Errors and conflict warnings remain visible. A new operation cancels the previous reset timer.
+1. sftpPluggin.mode. Type string. Default "ftp". Connection mode.
+2. sftpPluggin.ftpHost. Type string. Default an empty string. FTP host.
+3. sftpPluggin.ftpUser. Type string. Default an empty string. FTP user.
+4. sftpPluggin.ftpPort. Type number. Default 21. FTP port (default 21).
+5. sftpPluggin.sftpHost. Type string. Default an empty string. SFTP host.
+6. sftpPluggin.sftpUser. Type string. Default an empty string. SFTP user.
+7. sftpPluggin.sftpPort. Type number. Default 22. SSH port for SFTP mode. Teleport connections use tsh routing instead.
+8. sftpPluggin.teleportHost. Type string. Default an empty string. Teleport proxy host.
+9. sftpPluggin.teleportUser. Type string. Default an empty string. Teleport user.
+10. sftpPluggin.teleportCluster. Type string. Default an empty string. Teleport cluster.
+11. sftpPluggin.remotePath. Type string. Default an empty string. Remote path.
+12. sftpPluggin.localPath. Type string. Default an empty string. Absolute local project directory. The plugin does not expand workspaceFolder or environment variables.
+13. sftpPluggin.privateKey. Type string. Default an empty string. SSH private key path or inline key content for SFTP mode only. Saved form values are ordinary workspace state, not SecretStorage.
+14. sftpPluggin.passphrase. Type string. Default an empty string. Private key passphrase for SFTP mode only. Saved form values are ordinary workspace state, not SecretStorage.
+15. sftpPluggin.agent. Type string. Default an empty string. SSH agent socket path or pageant for SFTP mode only. Teleport uses tsh credentials.
+16. sftpPluggin.ignore. Type array. Default an empty array. Ignore patterns applied to both directions and queued uploads. Built in exclusions always include .git, .vscode and .sftp-sync.
+17. sftpPluggin.concurrency. Type integer. Default 4. Parallel file workers from 1 to 16. FTP and FTPS use separate connections. Teleport save batches use one rsync session.
+18. sftpPluggin.ftpPassive. Type boolean. Default true. Prefer IPv4 passive FTP when enabled. When disabled, use the library default passive strategy. Active FTP is not implemented.
+19. sftpPluggin.ftpSecure. Type boolean. Default false. Use FTPS (TLS) — encrypted FTP connection; enable if the server requires AUTH TLS.
+20. sftpPluggin.identity. Type string. Default an empty string. Legacy SFTP key path used only when privateKey is undefined. Prefer privateKey.
+21. sftpPluggin.sshFlags. Type string. Default an empty string. Legacy compatibility field. Not used by the current transports.
+22. sftpPluggin.rsyncFlags. Type string. Default an empty string. Teleport only. Supports --bwlimit=N, --exclude PATTERN and --exclude=PATTERN. Exclusions join Ignore rules. Other flags are rejected.
+23. sftpPluggin.debounceMs. Type number. Default 300. File watcher debounce in milliseconds.
+24. sftpPluggin.useRsync. Type boolean. Default false. Legacy compatibility field. Does not select a transport. SFTP uses ssh2 and Teleport always uses tsh with rsync.
+25. sftpPluggin.useTeleport. Type boolean. Default false. Legacy mode fallback used only when mode is absent. Select mode explicitly for new configurations.
+26. sftpPluggin.uploadOnSave. Type boolean. Default true. Upload queued local project changes after manual save. Local copies overwrite remote copies. Does not run two way conflict detection.
+27. sftpPluggin.uploadOnAutoSave. Type boolean. Default false. Upload queued local changes after editor Auto Save or observed workspace file events. Does not enable editor Auto Save or scan the whole project.
+28. sftpPluggin.showUploadButton. Type boolean. Default false. Show Upload in the editor title. After saving a private configuration, change this preference in the configuration panel.
+29. sftpPluggin.showDownloadButton. Type boolean. Default false. Show Download in the editor title. After saving a private configuration, change this preference in the configuration panel.
+30. sftpPluggin.scanConcurrency. Type integer. Default 4. Remote directory scan concurrency from 1 to 16 where individual listings are used. Full Teleport analysis uses one recursive remote command.
+31. sftpPluggin.verifyContents. Type boolean. Default false. Read all local file contents during analysis instead of reusing hashes for unchanged metadata.
+
+**Progress, storage and limits.**
+
+The configuration panel and status bar read shared task state. Closing the panel does not cancel a transfer. Reopening restores the current task or recent result. Use Cancel Transfer to interrupt the active transport. Pending uploads are durable, while the active task, recent logs and prepared plan are held in memory.
+
+Scanning shows stages, paths, counters and elapsed time. Transfer percentages advance as files complete, so a large active file can leave the percentage unchanged temporarily. Upload, download and session durations remain visible in results. The panel retains up to 500 recent entries with up to 2000 characters per entry. The Output channel receives the plain transfer log. Successful task progress returns to idle after a short delay.
+
+Transfer concurrency is bounded. FTP and FTPS use separate connections and serialize commands on each connection. Server limits may require lower transfer and scan concurrency. Teleport queued batches use one rsync process despite having multiple files.
+
+Local hash caches and per endpoint synchronization history live in VS Code global extension storage outside the project. Hashes are reused only when cached local metadata matches and expire after 24 hours. Verify contents bypasses cache reuse during analysis. Remote trees are freshly listed for a new analysis. Recognized legacy .sftp-sync history is copied and verified before removal. Unknown legacy files are preserved.
+
+Downloads use temporary staging outside the project and workspace before replacing a validated local destination. If no safe location on the required filesystem is available, the download fails. Uploads are not guaranteed to be atomically published on the server. An interrupted upload can leave a partial remote file, and metadata checks do not lock files against other writers.
+
+**Security and support.**
+
+Passwords use VS Code SecretStorage. Other configuration fields, including inline key content and key passphrases, use ordinary private workspace state after saving the form. Legacy user or workspace settings remain wherever the user originally stored them. Prefer key paths or an agent instead of inline key material. The SFTP adapter currently does not configure known_hosts verification or a pinned server host key. Encryption alone does not establish a previously verified server identity.
+
+The extension has no application analytics reporting code. Network activity includes configured server connections, Teleport CLI downloads when needed and browser authentication. The Teleport CLI and VS Code have their own behavior. Review logs before sharing because paths, server names, usernames and login links can appear.
+
+Report reproducible problems through the repository issue tracker. For details see SECURITY.md, CONTRIBUTING.md and RELEASE_CHECKLIST.md in the source repository. Live server compatibility and Marketplace acceptance are not guaranteed by the mocked tests or by successful packaging.
+
+Repository https://github.com/alejoas1981/sftp_pluggin_teleport.
+
+License terms are in LICENSE. Notices for bundled libraries are in THIRD_PARTY_NOTICES.txt.

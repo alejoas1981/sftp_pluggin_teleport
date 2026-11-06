@@ -9,15 +9,13 @@ import { renderProgress } from './progress';
 import { SyncTask } from './sync-task';
 import { normalizeRsyncOptions } from './rsync-options';
 import { SaveUploadQueue } from './save-upload-queue';
+import { PendingUploads } from './pending-uploads';
 import { isIgnored } from './utils';
 import { SYNC_EXCLUDES } from './sync-state';
 import { configureStorage } from './private-storage';
 
 let outputChannel: vscode.OutputChannel, extensionContext: vscode.ExtensionContext, syncInProgress = false;
-let saveUploads: SaveUploadQueue | undefined, savingBatch = false,
-    uploadBatchInProgress = false, uploadRestartPending = false;
-const pendingUploads = new Map<string, number>();
-let changeSequence = 0;
+let saveUploads: SaveUploadQueue | undefined, savingBatch = false, pendingUploads: PendingUploads;
 const saveReasons = new Map<string, number>(), syncTask = new SyncTask();
 
 /**
@@ -27,6 +25,7 @@ const saveReasons = new Map<string, number>(), syncTask = new SyncTask();
  */
 export function activate(context: vscode.ExtensionContext) {
     extensionContext = context;
+    pendingUploads = new PendingUploads(context.workspaceState);
     initializeConfiguration(context);
     context.subscriptions.push(vscode.workspace.onDidChangeConfiguration((event) => {
         if (event.affectsConfiguration('sftpPluggin')) {
@@ -58,6 +57,7 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.commands.registerCommand('sftpPluggin.startWatching', () => runCommand((cfg) => startWatcher(context, cfg))),
         vscode.commands.registerCommand('sftpPluggin.stopWatching', stopWatcher),
         vscode.commands.registerCommand('sftpPluggin.cancelTransfer', cancelTransfer),
+        vscode.commands.registerCommand('sftpPluggin.retryUploads', () => saveUploads?.request()),
         vscode.commands.registerCommand('sftpPluggin.uploadActiveFile', () => runCommand(uploadActiveFile)),
         vscode.commands.registerCommand('sftpPluggin.downloadActiveFile', () => runCommand(downloadActiveFile)),
         vscode.commands.registerCommand('sftpPluggin.syncFile', () => runCommand(syncActiveFile)),
@@ -69,18 +69,15 @@ export function activate(context: vscode.ExtensionContext) {
     saveUploads = new SaveUploadQueue(uploadSavedChanges, () => syncInProgress,
         (error: any) => {
             outputChannel.appendLine(`[save upload error] ${error.message}`);
-            vscode.window.showErrorMessage(`SFTP upload failed: ${error.message}. Save again to retry.`);
+            updateSftpStatus('$(warning) SFTP upload paused', `${pendingUploads.entries(getConfiguration()).size} pending files. ${error.message}`);
+            vscode.window.showErrorMessage(`SFTP upload paused with ${pendingUploads.entries(getConfiguration()).size} pending files. ${error.message}. Pending files retained. Use SFTP Retry Pending Uploads or save again.`);
         }, () => Math.max(50, getConfiguration().debounceMs ?? 300));
     const uploadWatcher = vscode.workspace.createFileSystemWatcher('**/*', false, false, false),
         onDiskChange = (uri: vscode.Uri) => {
             if (uri.scheme !== 'file' || !isUploadPath(getConfiguration(), uri.fsPath)) { return; }
-            pendingUploads.set(uri.fsPath, ++changeSequence);
+            recordPendingUpload(uri.fsPath);
             if (!savingBatch) {
                 const autoUpload = vscode.workspace.getConfiguration('sftpPluggin').get<boolean>('uploadOnAutoSave', false);
-                if (uploadBatchInProgress) {
-                    uploadRestartPending = true;
-                    cancelActiveTransfer();
-                }
                 if (autoUpload) { saveUploads?.request(); }
             }
         };
@@ -88,6 +85,12 @@ export function activate(context: vscode.ExtensionContext) {
     uploadWatcher.onDidCreate(onDiskChange);
     uploadWatcher.onDidDelete(onDiskChange);
     context.subscriptions.push(uploadWatcher, saveUploads);
+    if (pendingUploads.entries(getConfiguration()).size && vscode.workspace.getConfiguration('sftpPluggin').get<boolean>('uploadOnAutoSave', false)) {
+        saveUploads.request();
+    }
+
+    const restoredCount = pendingUploads.entries(getConfiguration()).size;
+    if (restoredCount) { updateSftpStatus('$(cloud-upload) SFTP pending', `${restoredCount} files waiting to upload`); }
 
     autoLogin().catch((error: any) => {
         outputChannel.appendLine(`[auto-login] ${error.message}`);
@@ -142,7 +145,7 @@ async function runCommand(action: (config: SftpConfig) => Promise<unknown> | voi
  */
 async function ensureTeleportIfNeeded(config: SftpConfig): Promise<void> {
     if (resolveMode(config) === 'teleport') {
-        await ensureTeleportSession(config, { onLink: openTeleportLink });
+        await ensureTeleportSession(config, { onLink: openTeleportLink, onConfirmTrust: confirmTeleportTrust });
     }
 }
 
@@ -304,7 +307,7 @@ async function runTeleportLogin(config: SftpConfig): Promise<void> {
         throw new Error('Teleport host and user are required');
     }
     startLoading();
-    const result = await ensureTeleportSession(config, { onLink: openTeleportLink });
+    const result = await ensureTeleportSession(config, { onLink: openTeleportLink, onConfirmTrust: confirmTeleportTrust });
     outputChannel.appendLine(result);
     stopLoading();
     outputChannel.appendLine('Teleport login successful');
@@ -341,6 +344,7 @@ function stopWatcher(): void {
     outputChannel.appendLine('SFTP watcher stopped');
 }
 
+/** Cancels the active transfer while preserving queued paths for a later request. */
 function cancelTransfer(): void {
     if (!cancelActiveTransfer()) {
         vscode.window.showInformationMessage('No active SFTP transfer');
@@ -430,7 +434,7 @@ function openConfigPanel(context: vscode.ExtensionContext) {
                         throw new Error('Teleport host and user are required');
                     }
                     startLoading();
-                    const result = await ensureTeleportSession(cfg, { onLink: openTeleportLink });
+                    const result = await ensureTeleportSession(cfg, { onLink: openTeleportLink, onConfirmTrust: confirmTeleportTrust });
                     outputChannel.appendLine(result);
                     post({ command: 'loginResult', status: 'ok', detail: 'Login successful' });
                     stopLoading();
@@ -503,6 +507,12 @@ function openConfigPanel(context: vscode.ExtensionContext) {
 
 }
 
+/** Requests explicit trust confirmation for the certificate prompt emitted by tsh. */
+async function confirmTeleportTrust(prompt: string): Promise<boolean> {
+    return await vscode.window.showWarningMessage(`Teleport requests certificate trust confirmation.\n${prompt}`,
+        { modal: true }, 'Trust certificate') === 'Trust certificate';
+}
+
 /**
  * Opens the provided Teleport login URL in the default browser.
  * @param url - The URL to open.
@@ -541,7 +551,7 @@ function handleDocumentSave(doc: vscode.TextDocument): void {
         reason = saveReasons.get(uri);
     saveReasons.delete(uri);
 
-    if (isUploadPath(getConfiguration(), doc.fileName)) { pendingUploads.set(doc.fileName, ++changeSequence); }
+    if (isUploadPath(getConfiguration(), doc.fileName)) { recordPendingUpload(doc.fileName); }
     const settings = vscode.workspace.getConfiguration('sftpPluggin'),
         uploadOnSave = settings.get<boolean>('uploadOnSave', true),
         uploadOnAutoSave = settings.get<boolean>('uploadOnAutoSave', false);
@@ -556,6 +566,17 @@ function handleDocumentSave(doc: vscode.TextDocument): void {
     if (!savingBatch && isUploadPath(getConfiguration(), doc.fileName)) { saveUploads?.request(); }
 }
 
+/** Records external and editor changes without losing persistence errors. */
+function recordPendingUpload(file: string): void {
+    const config = getConfiguration();
+    void pendingUploads.record(config, file).catch((error: Error) => {
+        outputChannel.appendLine(`[pending uploads] ${error.message}`);
+        vscode.window.showErrorMessage(`Cannot persist pending uploads. ${error.message}`);
+    });
+    if (!syncInProgress) { updateSftpStatus('$(cloud-upload) SFTP pending', `${pendingUploads.entries(config).size} files waiting to upload`); }
+}
+
+/** Tests whether a local path is eligible for upload under the current exclusions. */
 function isUploadPath(config: SftpConfig, file: string): boolean {
     try {
         let exclusions = config.ignore ?? [];
@@ -568,26 +589,13 @@ function isUploadPath(config: SftpConfig, file: string): boolean {
 }
 
 /**
- * Checks whether a failed upload became obsolete because local files changed again.
- * @param error - Upload failure raised after the local working tree changed.
- * @returns True when the latest queued snapshot should replace the failed transfer.
- */
-function isSupersededUploadError(error: unknown): boolean {
-    const message = error instanceof Error ? error.message : String(error);
-    return message.includes('Transfer cancelled') || message.includes('File changed during transfer')
-        || message.includes('File changed after scanning') || message.includes('status 255');
-}
-
-/**
- * Uploads the queued local snapshot and restarts cleanly when the working tree changes mid-transfer.
+ * Uploads a queued snapshot while retaining newer versions for the next batch.
  * @returns {Promise<void>} Resolves after the current snapshot finishes or is superseded.
  */
 async function uploadSavedChanges(): Promise<void> {
     const config = await loadConfig();
     if (syncInProgress) { saveUploads?.request(); return; }
     syncInProgress = true;
-    uploadBatchInProgress = true;
-    uploadRestartPending = false;
     syncTask.start(false);
     try {
         // Save only existing documents in this project; never prompt for untitled files.
@@ -600,35 +608,26 @@ async function uploadSavedChanges(): Promise<void> {
             }
         } finally { savingBatch = false; }
         syncTask.log('UPLOAD: locally changed files only; no remote tree scan.\n');
+        await pendingUploads.flush();
         await ensureTeleportIfNeeded(config);
-        const batch = new Map([...pendingUploads].filter(([file]) => isUploadPath(config, file))),
+        const batch = new Map([...pendingUploads.entries(config)].filter(([file]) => isUploadPath(config, file))),
             root = resolveLocalRoot(config),
             result = await uploadChangedFiles(config, {
             files: [...batch.keys()].map((file) => path.relative(root, file).replace(/\\/g, '/')),
             onLog: (text) => { syncTask.log(text); outputChannel.appendLine(text.trimEnd()); },
             onState: (state) => syncTask.update(state),
         });
-        for (const [file, sequence] of batch) {
-            if (pendingUploads.get(file) === sequence) { pendingUploads.delete(file); }
-        }
+        await pendingUploads.acknowledge(config, batch);
+        const remaining = [...pendingUploads.entries(config).keys()].filter((file) => isUploadPath(config, file)).length;
+        if (remaining) { saveUploads?.request(); }
+        outputChannel.appendLine(`Pending uploads remaining ${remaining}`);
         outputChannel.appendLine(result);
         syncTask.finish(result);
     } catch (error: any) {
-        if (uploadRestartPending && isSupersededUploadError(error)) {
-            const autoUpload = vscode.workspace.getConfiguration('sftpPluggin').get<boolean>('uploadOnAutoSave', false),
-                message = autoUpload ? 'Local files changed during transfer; restarting with the latest version.'
-                    : 'Local files changed during transfer; transfer cancelled. Save again to upload the latest version.';
-            syncTask.log(message + '\n');
-            outputChannel.appendLine(`[save-upload] ${message}`);
-            syncTask.finish(message, false, true);
-            return;
-        }
         syncTask.finish(error.message, true);
         throw error;
     } finally {
         syncInProgress = false;
-        uploadBatchInProgress = false;
-        uploadRestartPending = false;
     }
 }
 
@@ -639,7 +638,6 @@ async function uploadSavedChanges(): Promise<void> {
 export function deactivate() {
     saveUploads?.dispose();
     saveReasons.clear();
-    pendingUploads.clear();
     syncTask.dispose();
     stopWatching();
 }

@@ -9098,7 +9098,7 @@ var require_keyParser = __commonJS({
     var {
       createDecipheriv,
       createECDH,
-      createHash: createHash4,
+      createHash: createHash5,
       createHmac,
       createSign,
       createVerify,
@@ -9786,11 +9786,11 @@ ${formatted}-----END ${type} KEY-----`;
                 );
               }
               const ivSlice = bufferSlice(cipherIV, 0, 8);
-              let cipherKey = createHash4("md5").update(passphrase).update(ivSlice).digest();
+              let cipherKey = createHash5("md5").update(passphrase).update(ivSlice).digest();
               while (cipherKey.length < encInfo.keyLen) {
                 cipherKey = combineBuffers(
                   cipherKey,
-                  createHash4("md5").update(cipherKey).update(passphrase).update(ivSlice).digest()
+                  createHash5("md5").update(cipherKey).update(passphrase).update(ivSlice).digest()
                 );
               }
               if (cipherKey.length > encInfo.keyLen)
@@ -9955,8 +9955,8 @@ ${formatted}-----END ${type} KEY-----`;
         if (encrypted) {
           const encInfo = CIPHER_INFO[cipherName];
           let cipherKey = combineBuffers(
-            createHash4("sha1").update(PPK_PP1).update(passphrase).digest(),
-            createHash4("sha1").update(PPK_PP2).update(passphrase).digest()
+            createHash5("sha1").update(PPK_PP1).update(passphrase).digest(),
+            createHash5("sha1").update(PPK_PP2).update(passphrase).digest()
           );
           if (cipherKey.length > encInfo.keyLen)
             cipherKey = bufferSlice(cipherKey, 0, encInfo.keyLen);
@@ -9996,7 +9996,7 @@ ${formatted}-----END ${type} KEY-----`;
           passphrase = EMPTY_PASSPHRASE;
         const calcMAC = createHmac(
           "sha1",
-          createHash4("sha1").update("putty-private-key-file-mac-key").update(passphrase).digest()
+          createHash5("sha1").update("putty-private-key-file-mac-key").update(passphrase).digest()
         ).update(macData).digest("hex");
         if (calcMAC !== mac) {
           if (encrypted) {
@@ -12318,7 +12318,7 @@ var require_kex = __commonJS({
       createDiffieHellman,
       createDiffieHellmanGroup,
       createECDH,
-      createHash: createHash4,
+      createHash: createHash5,
       createPublicKey,
       diffieHellman,
       generateKeyPairSync,
@@ -12744,7 +12744,7 @@ var require_kex = __commonJS({
               DISCONNECT_REASON.KEY_EXCHANGE_FAILED
             );
           }
-          const hash = createHash4(this.hashName);
+          const hash = createHash5(this.hashName);
           hashString(hash, isServer ? this._remoteIdentRaw : this._identRaw);
           hashString(hash, isServer ? this._identRaw : this._remoteIdentRaw);
           hashString(hash, isServer ? this._remoteKexinit : this._kexinit);
@@ -13752,9 +13752,9 @@ var require_kex = __commonJS({
     function generateKEXVal(len, hashName, secret, exchangeHash, sessionID, char) {
       let ret;
       if (len) {
-        let digest = createHash4(hashName).update(secret).update(exchangeHash).update(char).update(sessionID).digest();
+        let digest = createHash5(hashName).update(secret).update(exchangeHash).update(char).update(sessionID).digest();
         while (digest.length < len) {
-          const chunk = createHash4(hashName).update(secret).update(exchangeHash).update(digest).digest();
+          const chunk = createHash5(hashName).update(secret).update(exchangeHash).update(digest).digest();
           const extended = Buffer.allocUnsafe(digest.length + chunk.length);
           extended.set(digest, 0);
           extended.set(chunk, digest.length);
@@ -19189,7 +19189,7 @@ var require_client = __commonJS({
   "node_modules/ssh2/lib/client.js"(exports2, module2) {
     "use strict";
     var {
-      createHash: createHash4,
+      createHash: createHash5,
       getHashes,
       randomFillSync
     } = require("crypto");
@@ -19411,7 +19411,7 @@ var require_client = __commonJS({
           }
           hostVerifier = (key, verify) => {
             if (hashAlgo)
-              key = createHash4(hashAlgo).update(key).digest("hex");
+              key = createHash5(hashAlgo).update(key).digest("hex");
             const ret = hashCb(key, verify);
             if (ret !== void 0)
               verify(ret);
@@ -27424,6 +27424,8 @@ Automatic deletion: disabled`;
 };
 
 // src/sync.ts
+var loginOptions = /* @__PURE__ */ new Map();
+var recoveries = /* @__PURE__ */ new Map();
 var SESSION_CACHE_MS = 6e4;
 var remoteActionQueue = new import_p_queue.default({ concurrency: 1 });
 var cachedSession;
@@ -28127,16 +28129,33 @@ async function withRemoteClient(config, action) {
     }), onAbort = () => rejectCancellation == null ? void 0 : rejectCancellation(new Error("Transfer cancelled"));
     controller.signal.addEventListener("abort", onAbort, { once: true });
     try {
-      if (resolveMode(config) === "teleport") {
-        await ensureTeleportSession(config);
+      for (let attempt = 0; ; attempt++) {
+        try {
+          if (resolveMode(config) === "teleport") {
+            await ensureTeleportSession(config);
+          }
+          if (controller.signal.aborted) {
+            throw new Error("Transfer cancelled");
+          }
+          client = createRemoteClient(config, controller.signal);
+          return await Promise.race([action(client), cancellation]);
+        } catch (error) {
+          if (attempt || controller.signal.aborted || resolveMode(config) !== "teleport" || !isTeleportAuthenticationError(error)) {
+            throw error;
+          }
+          await (client == null ? void 0 : client.close());
+          client = void 0;
+          await Promise.race([recoverTeleportSession(config), cancellation]);
+        }
       }
-      client = createRemoteClient(config, controller.signal);
-      return await Promise.race([action(client), cancellation]);
     } finally {
       controller.signal.removeEventListener("abort", onAbort);
-      await (client == null ? void 0 : client.close());
-      if (activeTransferController === controller) {
-        activeTransferController = void 0;
+      try {
+        await (client == null ? void 0 : client.close());
+      } finally {
+        if (activeTransferController === controller) {
+          activeTransferController = void 0;
+        }
       }
     }
   });
@@ -28217,9 +28236,33 @@ async function loginToTeleport(config, options = {}) {
   }
   return new Promise((resolve3, reject) => {
     const child = cp2.spawn(tshPath, args, { env: process.env });
-    let stdout = "", stderr = "", linkSent = false;
+    let stdout = "", stderr = "", linkSent = false, trustRequested = false, promptBuffer = "";
+    const timeout = setTimeout(() => {
+      child.kill();
+      reject(new Error("Teleport login timed out"));
+    }, 12e4);
     const handleData = (data) => {
       const text = data.toString();
+      promptBuffer = (promptBuffer + text).slice(-8192);
+      if (!trustRequested && /yes\/no|\[y\/n\]|type.*yes|enter.*yes/i.test(promptBuffer)) {
+        trustRequested = true;
+        if (!options.onConfirmTrust) {
+          child.kill();
+          reject(new Error("Teleport certificate confirmation required. Run Teleport Login."));
+        } else {
+          void options.onConfirmTrust(promptBuffer).then((confirmed) => {
+            if (confirmed && child.exitCode === null) {
+              child.stdin.write("yes\n");
+            } else {
+              child.kill();
+              reject(new Error("Teleport certificate confirmation declined"));
+            }
+          }).catch((error) => {
+            child.kill();
+            reject(error);
+          });
+        }
+      }
       if (options.onLink) {
         const proxyHost = config.teleportHost ? config.teleportHost.replace(/^https?:\/\//, "").split("/")[0] : void 0;
         const matches = text.match(/https?:\/\/[^\s]+/g);
@@ -28237,8 +28280,12 @@ async function loginToTeleport(config, options = {}) {
     child.stderr.on("data", (data) => {
       stderr += handleData(data);
     });
-    child.on("error", reject);
+    child.on("error", (error) => {
+      clearTimeout(timeout);
+      reject(error);
+    });
     child.on("close", (code) => {
+      clearTimeout(timeout);
       if (code !== 0) {
         const message = stderr.trim() || stdout.trim() || `tsh login exited with code ${code}`;
         reject(new Error(message));
@@ -28248,11 +28295,45 @@ async function loginToTeleport(config, options = {}) {
     });
   });
 }
+function isTeleportAuthenticationError(error) {
+  return /x509: certificate signed by unknown authority|certificate.*expired|session.*expired|not logged in|relogin/i.test(error instanceof Error ? error.message : String(error));
+}
+function teleportSessionKey(config) {
+  return JSON.stringify([config.teleportHost, config.teleportUser, config.teleportCluster]);
+}
+async function recoverTeleportSession(config) {
+  const key = teleportSessionKey(config), existing = recoveries.get(key);
+  if (existing) {
+    return existing;
+  }
+  const recovery = (async () => {
+    cachedSession = void 0;
+    const tshPath = await ensureTsh();
+    await spawnCommand(tshPath, ["logout", `--proxy=${config.teleportHost}`, `--user=${config.teleportUser}`], { env: process.env });
+    const out = await loginToTeleport(config, loginOptions.get(key));
+    cachedSession = { configKey: key, output: out, validUntil: Date.now() + SESSION_CACHE_MS };
+    return out;
+  })();
+  recoveries.set(key, recovery);
+  try {
+    return await recovery;
+  } finally {
+    recoveries.delete(key);
+  }
+}
 async function ensureTeleportSession(config, options = {}) {
   if (resolveMode(config) !== "teleport") {
     return "";
   }
-  const key = `${config.teleportHost}:${config.teleportUser}:${config.teleportCluster}`;
+  const key = teleportSessionKey(config);
+  if (options.onLink || options.onConfirmTrust) {
+    loginOptions.set(key, options);
+  }
+  options = loginOptions.get(key) ?? options;
+  const recovering = recoveries.get(key);
+  if (recovering) {
+    return recovering;
+  }
   if (cachedSession && cachedSession.configKey === key && Date.now() < cachedSession.validUntil) {
     return cachedSession.output;
   }
@@ -28264,8 +28345,8 @@ async function ensureTeleportSession(config, options = {}) {
     }
     cachedSession = { configKey: key, output: out, validUntil: Date.now() + SESSION_CACHE_MS };
     return out;
-  } catch {
-    const out = await loginToTeleport(config, options);
+  } catch (error) {
+    const out = isTeleportAuthenticationError(error) ? await recoverTeleportSession(config) : await loginToTeleport(config, options);
     cachedSession = { configKey: key, output: out, validUntil: Date.now() + SESSION_CACHE_MS };
     return out;
   }
@@ -28596,49 +28677,70 @@ Download time: ${this.state.downloadMs} ms`;
 
 // src/save-upload-queue.ts
 var SaveUploadQueue = class {
-  constructor(run, busy, onError, delay) {
+  /** Creates a queue with bounded exponential retry delays. */
+  constructor(run, busy, onError, delay, retryDelay = 1e3, retryLimit = 3) {
     this.run = run;
     this.busy = busy;
     this.onError = onError;
     this.delay = delay;
+    this.retryDelay = retryDelay;
+    this.retryLimit = retryLimit;
     this.pending = false;
     this.running = false;
     this.disposed = false;
+    this.attempts = 0;
   }
+  /** Requests a fresh attempt, including when a previous retry budget was exhausted. */
   request() {
     if (this.disposed) {
       return;
     }
+    this.attempts = 0;
     this.pending = true;
+    this.schedule(this.delay());
+  }
+  /** Replaces the pending timer without starting overlapping work. */
+  schedule(delay) {
     if (this.timer) {
       clearTimeout(this.timer);
     }
     this.timer = setTimeout(() => {
       void this.flush();
-    }, this.delay());
+    }, delay);
   }
+  /** Runs one batch and retains failed work for bounded retries or a manual request. */
   async flush() {
     this.timer = void 0;
     if (this.disposed || !this.pending || this.running) {
       return;
     }
     if (this.busy()) {
-      this.request();
+      this.schedule(this.delay());
       return;
     }
     this.pending = false;
     this.running = true;
+    let wait = this.delay();
     try {
       await this.run();
+      this.attempts = 0;
     } catch (error) {
-      this.onError(error);
+      const message = error instanceof Error ? error.message : String(error), temporary = /offline|ECONN|ETIMEDOUT|EPIPE|connection.*(?:lost|reset|closed|error)|socket|temporarily unavailable|File changed|status 255/i.test(message);
+      if (temporary && !/x509|certificate|permission denied|authentication|Transfer cancelled/i.test(message) && this.attempts < this.retryLimit) {
+        wait = this.retryDelay * 2 ** this.attempts++;
+        this.pending = true;
+      } else {
+        this.pending = false;
+        this.onError(error);
+      }
     } finally {
       this.running = false;
-      if (this.pending) {
-        this.request();
+      if (this.pending && !this.disposed) {
+        this.schedule(wait);
       }
     }
   }
+  /** Stops timers and prevents an in-flight operation from scheduling more work. */
   dispose() {
     this.disposed = true;
     this.pending = false;
@@ -28648,21 +28750,84 @@ var SaveUploadQueue = class {
   }
 };
 
+// src/pending-uploads.ts
+var import_crypto5 = require("crypto");
+var PendingUploads = class {
+  /** Binds the journal to VS Code workspace storage. */
+  constructor(storage) {
+    this.storage = storage;
+    this.queues = /* @__PURE__ */ new Map();
+    this.sequence = 0;
+    this.writes = Promise.resolve();
+  }
+  /** Returns the queue for this exact local and remote destination. */
+  entries(config) {
+    const key = this.key(config);
+    let queue = this.queues.get(key);
+    if (!queue) {
+      queue = new Map((this.storage.get(key) ?? []).filter((file) => typeof file === "string").map((file) => [file, ++this.sequence]));
+      this.queues.set(key, queue);
+    }
+    return queue;
+  }
+  /** Records the latest observed file version and persists its path. */
+  record(config, file) {
+    this.entries(config).set(file, ++this.sequence);
+    return this.persist(config);
+  }
+  /** Removes only versions successfully handled by the supplied batch. */
+  acknowledge(config, batch) {
+    const queue = this.entries(config);
+    for (const [file, sequence] of batch) {
+      if (queue.get(file) === sequence) {
+        queue.delete(file);
+      }
+    }
+    return this.persist(config);
+  }
+  /** Waits until all recorded paths are durable before starting a transfer. */
+  async flush() {
+    await this.writes;
+  }
+  /** Serializes snapshots so an older write cannot replace newer pending paths. */
+  persist(config) {
+    const key = this.key(config), files = [...this.entries(config).keys()];
+    this.writes = this.writes.catch(() => {
+    }).then(() => this.storage.update(key, files));
+    return this.writes;
+  }
+  /** Hashes connection identity without storing passwords or other credentials. */
+  key(config) {
+    return "pendingUploads." + (0, import_crypto5.createHash)("sha256").update(JSON.stringify([
+      config.localPath,
+      resolveMode(config),
+      config.ftpHost,
+      config.ftpPort,
+      config.ftpUser,
+      config.sftpHost,
+      config.sftpPort,
+      config.sftpUser,
+      config.remotePath,
+      config.teleportHost,
+      config.teleportUser,
+      config.teleportCluster
+    ])).digest("hex");
+  }
+};
+
 // src/extension.ts
 var outputChannel;
 var extensionContext;
 var syncInProgress = false;
 var saveUploads;
 var savingBatch = false;
-var uploadBatchInProgress = false;
-var uploadRestartPending = false;
-var pendingUploads = /* @__PURE__ */ new Map();
-var changeSequence = 0;
+var pendingUploads;
 var saveReasons = /* @__PURE__ */ new Map();
 var syncTask = new SyncTask();
 function activate(context) {
   var _a;
   extensionContext = context;
+  pendingUploads = new PendingUploads(context.workspaceState);
   initializeConfiguration(context);
   context.subscriptions.push(vscode4.workspace.onDidChangeConfiguration((event) => {
     if (event.affectsConfiguration("sftpPluggin")) {
@@ -28696,6 +28861,7 @@ Files: ${state.current}/${state.total ?? "?"} | Local: ${state.localFiles} | Rem
     vscode4.commands.registerCommand("sftpPluggin.startWatching", () => runCommand((cfg) => startWatcher(context, cfg))),
     vscode4.commands.registerCommand("sftpPluggin.stopWatching", stopWatcher),
     vscode4.commands.registerCommand("sftpPluggin.cancelTransfer", cancelTransfer),
+    vscode4.commands.registerCommand("sftpPluggin.retryUploads", () => saveUploads == null ? void 0 : saveUploads.request()),
     vscode4.commands.registerCommand("sftpPluggin.uploadActiveFile", () => runCommand(uploadActiveFile)),
     vscode4.commands.registerCommand("sftpPluggin.downloadActiveFile", () => runCommand(downloadActiveFile)),
     vscode4.commands.registerCommand("sftpPluggin.syncFile", () => runCommand(syncActiveFile)),
@@ -28708,7 +28874,8 @@ Files: ${state.current}/${state.total ?? "?"} | Local: ${state.localFiles} | Rem
     () => syncInProgress,
     (error) => {
       outputChannel.appendLine(`[save upload error] ${error.message}`);
-      vscode4.window.showErrorMessage(`SFTP upload failed: ${error.message}. Save again to retry.`);
+      updateSftpStatus("$(warning) SFTP upload paused", `${pendingUploads.entries(getConfiguration()).size} pending files. ${error.message}`);
+      vscode4.window.showErrorMessage(`SFTP upload paused with ${pendingUploads.entries(getConfiguration()).size} pending files. ${error.message}. Pending files retained. Use SFTP Retry Pending Uploads or save again.`);
     },
     () => Math.max(50, getConfiguration().debounceMs ?? 300)
   );
@@ -28716,13 +28883,9 @@ Files: ${state.current}/${state.total ?? "?"} | Local: ${state.localFiles} | Rem
     if (uri.scheme !== "file" || !isUploadPath(getConfiguration(), uri.fsPath)) {
       return;
     }
-    pendingUploads.set(uri.fsPath, ++changeSequence);
+    recordPendingUpload(uri.fsPath);
     if (!savingBatch) {
       const autoUpload = vscode4.workspace.getConfiguration("sftpPluggin").get("uploadOnAutoSave", false);
-      if (uploadBatchInProgress) {
-        uploadRestartPending = true;
-        cancelActiveTransfer();
-      }
       if (autoUpload) {
         saveUploads == null ? void 0 : saveUploads.request();
       }
@@ -28732,6 +28895,13 @@ Files: ${state.current}/${state.total ?? "?"} | Local: ${state.localFiles} | Rem
   uploadWatcher.onDidCreate(onDiskChange);
   uploadWatcher.onDidDelete(onDiskChange);
   context.subscriptions.push(uploadWatcher, saveUploads);
+  if (pendingUploads.entries(getConfiguration()).size && vscode4.workspace.getConfiguration("sftpPluggin").get("uploadOnAutoSave", false)) {
+    saveUploads.request();
+  }
+  const restoredCount = pendingUploads.entries(getConfiguration()).size;
+  if (restoredCount) {
+    updateSftpStatus("$(cloud-upload) SFTP pending", `${restoredCount} files waiting to upload`);
+  }
   autoLogin().catch((error) => {
     outputChannel.appendLine(`[auto-login] ${error.message}`);
     updateSftpStatus("$(warning) SFTP: not logged in");
@@ -28765,7 +28935,7 @@ async function runCommand(action) {
 }
 async function ensureTeleportIfNeeded(config) {
   if (resolveMode(config) === "teleport") {
-    await ensureTeleportSession(config, { onLink: openTeleportLink });
+    await ensureTeleportSession(config, { onLink: openTeleportLink, onConfirmTrust: confirmTeleportTrust });
   }
 }
 function resolveLocalRoot(config) {
@@ -28873,7 +29043,7 @@ async function runTeleportLogin(config) {
     throw new Error("Teleport host and user are required");
   }
   startLoading();
-  const result = await ensureTeleportSession(config, { onLink: openTeleportLink });
+  const result = await ensureTeleportSession(config, { onLink: openTeleportLink, onConfirmTrust: confirmTeleportTrust });
   outputChannel.appendLine(result);
   stopLoading();
   outputChannel.appendLine("Teleport login successful");
@@ -28978,7 +29148,7 @@ ${jsContent}
             throw new Error("Teleport host and user are required");
           }
           startLoading();
-          const result = await ensureTeleportSession(cfg, { onLink: openTeleportLink });
+          const result = await ensureTeleportSession(cfg, { onLink: openTeleportLink, onConfirmTrust: confirmTeleportTrust });
           outputChannel.appendLine(result);
           post({ command: "loginResult", status: "ok", detail: "Login successful" });
           stopLoading();
@@ -29052,6 +29222,14 @@ ${jsContent}
     }
   });
 }
+async function confirmTeleportTrust(prompt) {
+  return await vscode4.window.showWarningMessage(
+    `Teleport requests certificate trust confirmation.
+${prompt}`,
+    { modal: true },
+    "Trust certificate"
+  ) === "Trust certificate";
+}
 function openTeleportLink(url) {
   vscode4.env.openExternal(vscode4.Uri.parse(url)).then((opened) => {
     if (opened) {
@@ -29076,7 +29254,7 @@ function handleDocumentSave(doc) {
   const uri = doc.uri.toString(), reason = saveReasons.get(uri);
   saveReasons.delete(uri);
   if (isUploadPath(getConfiguration(), doc.fileName)) {
-    pendingUploads.set(doc.fileName, ++changeSequence);
+    recordPendingUpload(doc.fileName);
   }
   const settings = vscode4.workspace.getConfiguration("sftpPluggin"), uploadOnSave = settings.get("uploadOnSave", true), uploadOnAutoSave = settings.get("uploadOnAutoSave", false);
   const isManual = reason === vscode4.TextDocumentSaveReason.Manual, isAuto = reason === vscode4.TextDocumentSaveReason.AfterDelay || reason === vscode4.TextDocumentSaveReason.FocusOut;
@@ -29093,6 +29271,16 @@ function handleDocumentSave(doc) {
     saveUploads == null ? void 0 : saveUploads.request();
   }
 }
+function recordPendingUpload(file) {
+  const config = getConfiguration();
+  void pendingUploads.record(config, file).catch((error) => {
+    outputChannel.appendLine(`[pending uploads] ${error.message}`);
+    vscode4.window.showErrorMessage(`Cannot persist pending uploads. ${error.message}`);
+  });
+  if (!syncInProgress) {
+    updateSftpStatus("$(cloud-upload) SFTP pending", `${pendingUploads.entries(config).size} files waiting to upload`);
+  }
+}
 function isUploadPath(config, file) {
   try {
     let exclusions = config.ignore ?? [];
@@ -29106,10 +29294,6 @@ function isUploadPath(config, file) {
     return false;
   }
 }
-function isSupersededUploadError(error) {
-  const message = error instanceof Error ? error.message : String(error);
-  return message.includes("Transfer cancelled") || message.includes("File changed during transfer") || message.includes("File changed after scanning") || message.includes("status 255");
-}
 async function uploadSavedChanges() {
   const config = await loadConfig();
   if (syncInProgress) {
@@ -29117,8 +29301,6 @@ async function uploadSavedChanges() {
     return;
   }
   syncInProgress = true;
-  uploadBatchInProgress = true;
-  uploadRestartPending = false;
   syncTask.start(false);
   try {
     savingBatch = true;
@@ -29134,8 +29316,9 @@ async function uploadSavedChanges() {
       savingBatch = false;
     }
     syncTask.log("UPLOAD: locally changed files only; no remote tree scan.\n");
+    await pendingUploads.flush();
     await ensureTeleportIfNeeded(config);
-    const batch = new Map([...pendingUploads].filter(([file]) => isUploadPath(config, file))), root = resolveLocalRoot(config), result = await uploadChangedFiles(config, {
+    const batch = new Map([...pendingUploads.entries(config)].filter(([file]) => isUploadPath(config, file))), root = resolveLocalRoot(config), result = await uploadChangedFiles(config, {
       files: [...batch.keys()].map((file) => path9.relative(root, file).replace(/\\/g, "/")),
       onLog: (text) => {
         syncTask.log(text);
@@ -29143,33 +29326,24 @@ async function uploadSavedChanges() {
       },
       onState: (state) => syncTask.update(state)
     });
-    for (const [file, sequence] of batch) {
-      if (pendingUploads.get(file) === sequence) {
-        pendingUploads.delete(file);
-      }
+    await pendingUploads.acknowledge(config, batch);
+    const remaining = [...pendingUploads.entries(config).keys()].filter((file) => isUploadPath(config, file)).length;
+    if (remaining) {
+      saveUploads == null ? void 0 : saveUploads.request();
     }
+    outputChannel.appendLine(`Pending uploads remaining ${remaining}`);
     outputChannel.appendLine(result);
     syncTask.finish(result);
   } catch (error) {
-    if (uploadRestartPending && isSupersededUploadError(error)) {
-      const autoUpload = vscode4.workspace.getConfiguration("sftpPluggin").get("uploadOnAutoSave", false), message = autoUpload ? "Local files changed during transfer; restarting with the latest version." : "Local files changed during transfer; transfer cancelled. Save again to upload the latest version.";
-      syncTask.log(message + "\n");
-      outputChannel.appendLine(`[save-upload] ${message}`);
-      syncTask.finish(message, false, true);
-      return;
-    }
     syncTask.finish(error.message, true);
     throw error;
   } finally {
     syncInProgress = false;
-    uploadBatchInProgress = false;
-    uploadRestartPending = false;
   }
 }
 function deactivate() {
   saveUploads == null ? void 0 : saveUploads.dispose();
   saveReasons.clear();
-  pendingUploads.clear();
   syncTask.dispose();
   stopWatching();
 }
