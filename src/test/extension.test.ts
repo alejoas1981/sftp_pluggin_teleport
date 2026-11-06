@@ -73,6 +73,54 @@ describe('extension', () => {
         expect((vscode as any)._didSaveListeners).to.have.length(1);
     });
 
+    it('reveals one configuration tab and creates a fresh tab after disposal', async () => {
+        const original = vscode.window.createWebviewPanel;
+        let creates = 0, reveals = 0, disposeHandler!: () => void;
+        (vscode.window as any).createWebviewPanel = () => {
+            creates++;
+            return { webview: { html: '', onDidReceiveMessage: () => {}, postMessage: async () => true },
+                onDidDispose: (handler: () => void) => { disposeHandler = handler; },
+                reveal: () => { reveals++; }, dispose: () => { disposeHandler(); } };
+        };
+        try {
+            await ext.activate(context);
+            const open = (vscode as any)._commands['sftpPluggin.openConfig'];
+            open(); open(); open();
+            expect(creates).to.equal(1); expect(reveals).to.equal(2);
+            disposeHandler(); open(); expect(creates).to.equal(2);
+        } finally { (vscode.window as any).createWebviewPanel = original; }
+    });
+
+    it('queues offline edits on reopening and uploads them when automatic uploads are enabled', async () => {
+        Object.assign((vscode as any)._values, { sftpHost: 'host', sftpUser: 'user', remotePath: '/remote', uploadOnAutoSave: true });
+        const file = path.join(tempDir, 'offline.txt'), batches: string[][] = [];
+        fs.writeFileSync(file, 'before');
+        syncMock.uploadChangedFiles = async (_config: any, options: any) => { batches.push(options.files); return 'done'; };
+        await ext.activate(context); ext.deactivate();
+        fs.writeFileSync(file, 'changed while closed');
+        fs.writeFileSync(path.join(tempDir, 'new.txt'), 'created while closed');
+        await ext.activate(context);
+        await new Promise((resolve) => setTimeout(resolve, 160));
+        expect(batches).to.have.length(1);
+        expect(batches[0].sort()).to.deep.equal(['new.txt', 'offline.txt']);
+        expect(syncCalls).not.to.include('runSync:false');
+    });
+
+    it('discovers edits on window focus but waits for retry when automatic uploads are disabled', async () => {
+        Object.assign((vscode as any)._values, { sftpHost: 'host', sftpUser: 'user', remotePath: '/remote', uploadOnAutoSave: false });
+        const file = path.join(tempDir, 'focus.txt'), batches: string[][] = [];
+        fs.writeFileSync(file, 'before');
+        syncMock.uploadChangedFiles = async (_config: any, options: any) => { batches.push(options.files); return 'done'; };
+        await ext.activate(context);
+        fs.writeFileSync(file, 'changed without a watcher event');
+        (vscode as any)._windowStateListeners[0]({ focused: true });
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        expect(batches).to.have.length(0);
+        (vscode as any)._commands['sftpPluggin.retryUploads']();
+        await new Promise((resolve) => setTimeout(resolve, 120));
+        expect(batches).to.deep.equal([['focus.txt']]);
+    });
+
     it('syncNow command runs sync', async () => {
         await ext.activate(context);
 

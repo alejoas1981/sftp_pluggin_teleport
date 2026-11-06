@@ -299,7 +299,7 @@
         "sftpPluggin.uploadOnAutoSave": {
           "type": "boolean",
           "default": false,
-          "description": "Upload queued local changes after editor Auto Save or observed workspace file events. Does not enable editor Auto Save or scan the whole project."
+          "description": "Upload queued local changes after editor Auto Save, workspace file events or local change discovery on project opening and window focus. Does not enable editor Auto Save."
         },
         "sftpPluggin.showUploadButton": {
           "type": "boolean",

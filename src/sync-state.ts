@@ -62,6 +62,7 @@ function historyEntries(content: string): Array<[string, SyncRecord]> {
 /** Stores successful pairs separately for each endpoint, without credentials. */
 export class SyncState {
     readonly directory: string;
+    readonly localInventoryFile: string;
     private readonly file: string;
     private original = '';
     readonly records = new Map<string, SyncRecord>();
@@ -76,6 +77,7 @@ export class SyncState {
             key = createHash('sha256').update(JSON.stringify(identity)).digest('hex');
         this.directory = projectStorage(config.localPath!);
         this.file = path.join(this.directory, `${key}.json`);
+        this.localInventoryFile = path.join(this.directory, `inventory-${key}.json`);
     }
 
     async load(): Promise<void> {

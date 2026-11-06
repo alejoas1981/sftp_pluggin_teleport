@@ -10,20 +10,23 @@ import { SyncTask } from './sync-task';
 import { normalizeRsyncOptions } from './rsync-options';
 import { SaveUploadQueue } from './save-upload-queue';
 import { PendingUploads } from './pending-uploads';
+import { LocalChangeDiscovery } from './local-change-discovery';
 import { isIgnored } from './utils';
 import { SYNC_EXCLUDES } from './sync-state';
 import { configureStorage } from './private-storage';
 
-let outputChannel: vscode.OutputChannel, extensionContext: vscode.ExtensionContext, syncInProgress = false;
-let saveUploads: SaveUploadQueue | undefined, savingBatch = false, pendingUploads: PendingUploads;
+let outputChannel: vscode.OutputChannel, extensionContext: vscode.ExtensionContext, syncInProgress = false,
+    saveUploads: SaveUploadQueue | undefined, savingBatch = false, pendingUploads: PendingUploads,
+    configPanel: vscode.WebviewPanel | undefined, discovery: Promise<void> | undefined, discoveryController: AbortController;
 const saveReasons = new Map<string, number>(), syncTask = new SyncTask();
 
 /**
  * Activates the SFTP plugin and registers commands and event listeners.
  * @param context - The VS Code extension context.
- * @returns {void}
+ * @returns {Promise<void>} Resolves after initial local change discovery.
  */
-export function activate(context: vscode.ExtensionContext) {
+export async function activate(context: vscode.ExtensionContext): Promise<void> {
+    discoveryController = new AbortController();
     extensionContext = context;
     pendingUploads = new PendingUploads(context.workspaceState);
     initializeConfiguration(context);
@@ -84,7 +87,9 @@ export function activate(context: vscode.ExtensionContext) {
     uploadWatcher.onDidChange(onDiskChange);
     uploadWatcher.onDidCreate(onDiskChange);
     uploadWatcher.onDidDelete(onDiskChange);
-    context.subscriptions.push(uploadWatcher, saveUploads);
+    context.subscriptions.push(uploadWatcher, saveUploads, vscode.window.onDidChangeWindowState((state) => {
+        if (state.focused) { void discoverLocalUploads(); }
+    }));
     if (pendingUploads.entries(getConfiguration()).size && vscode.workspace.getConfiguration('sftpPluggin').get<boolean>('uploadOnAutoSave', false)) {
         saveUploads.request();
     }
@@ -96,6 +101,36 @@ export function activate(context: vscode.ExtensionContext) {
         outputChannel.appendLine(`[auto-login] ${error.message}`);
         updateSftpStatus('$(warning) SFTP: not logged in');
     });
+    await discoverLocalUploads();
+}
+
+/** Discovers offline local edits once at a time and submits them to the durable queue.
+ * @returns Completes after local discovery and pending path persistence.
+ */
+function discoverLocalUploads(): Promise<void> {
+    if (discovery) { return discovery; }
+    const config = getConfiguration(), mode = resolveMode(config), controller = discoveryController;
+    if (!config.localPath || !path.isAbsolute(config.localPath) || !config.remotePath
+        || (mode === 'ftp' ? !config.ftpHost || !config.ftpUser : !config.sftpHost || !config.sftpUser)
+        || (mode === 'teleport' && (!config.teleportHost || !config.teleportUser))) { return Promise.resolve(); }
+    const journal = pendingUploads;
+    if (!syncInProgress) { updateSftpStatus('$(search) SFTP checking local changes'); }
+    discovery = new LocalChangeDiscovery().scan(config, async (file) => {
+        await journal.record(config, file);
+    }, controller.signal).then((count) => {
+        if (controller.signal.aborted) { return; }
+        outputChannel.appendLine(`[local discovery] ${count} changed files found without a remote scan.`);
+        if (!syncInProgress && !journal.entries(config).size) { stopLoading(); }
+        if (count || journal.entries(config).size) {
+            if (!syncInProgress) { updateSftpStatus('$(cloud-upload) SFTP pending', `${journal.entries(config).size} files waiting to upload`); }
+            if (vscode.workspace.getConfiguration('sftpPluggin').get<boolean>('uploadOnAutoSave', false)) { saveUploads?.request(); }
+        }
+    }).catch((error: Error) => {
+        if (controller.signal.aborted) { return; }
+        outputChannel.appendLine(`[local discovery error] ${error.message}`);
+        vscode.window.showErrorMessage(`Could not check offline local changes. ${error.message}`);
+    }).finally(() => { discovery = undefined; });
+    return discovery;
 }
 
 /**
@@ -354,11 +389,12 @@ function cancelTransfer(): void {
 }
 
 /**
- * Opens the SFTP configuration webview panel.
+ * Reveals the existing configuration tab or opens one when no panel exists.
  * @param context - The VS Code extension context.
  * @returns {void}
  */
 function openConfigPanel(context: vscode.ExtensionContext) {
+    if (configPanel) { configPanel.reveal(); return; }
     const panel = vscode.window.createWebviewPanel(
         'sftpConfig',
         'FTP / SFTP / Teleport Configuration',
@@ -369,6 +405,8 @@ function openConfigPanel(context: vscode.ExtensionContext) {
         }
     );
 
+    configPanel = panel;
+    context.subscriptions.push(panel);
     const htmlPath = path.join(context.extensionPath, 'src', 'webview', 'config.html'),
         jsPath = path.join(context.extensionPath, 'src', 'webview', 'config.js'),
         jsContent = fs.readFileSync(jsPath, 'utf8');
@@ -383,7 +421,11 @@ function openConfigPanel(context: vscode.ExtensionContext) {
         catch { /* VS Code may throw synchronously after disposal. */ }
     },
         unsubscribe = syncTask.subscribe((state) => post({ command: 'syncState', state }));
-    panel.onDidDispose(() => { disposed = true; unsubscribe(); });
+    panel.onDidDispose(() => {
+        disposed = true;
+        if (configPanel === panel) { configPanel = undefined; }
+        unsubscribe();
+    });
 
     panel.webview.html = html;
 
@@ -419,6 +461,7 @@ function openConfigPanel(context: vscode.ExtensionContext) {
             case 'save': {
                 try {
                     await saveConfiguration(context, message.config);
+                    await discoverLocalUploads();
                     post({ command: 'saved' });
                     outputChannel.appendLine('SFTP configuration saved');
                 } catch (error: any) {
@@ -636,6 +679,9 @@ async function uploadSavedChanges(): Promise<void> {
  * @returns {void}
  */
 export function deactivate() {
+    discoveryController?.abort();
+    configPanel?.dispose();
+    configPanel = undefined;
     saveUploads?.dispose();
     saveReasons.clear();
     syncTask.dispose();

@@ -7,6 +7,7 @@ const watchers = [];
 const commands = {};
 const outputChannels = [];
 const willSaveListeners = [];
+const windowStateListeners = [];
 const didSaveListeners = [];
 function reset() {
     updates.length = 0;
@@ -18,6 +19,7 @@ function reset() {
     outputChannels.length = 0;
     willSaveListeners.length = 0;
     didSaveListeners.length = 0;
+    windowStateListeners.length = 0;
 }
 function getValue(key, defaultValue) {
     return key in values ? values[key] : defaultValue;
@@ -87,6 +89,7 @@ const vscodeMock = {
     _outputChannels: outputChannels,
     _willSaveListeners: willSaveListeners,
     _didSaveListeners: didSaveListeners,
+    _windowStateListeners: windowStateListeners,
     workspace: {
         textDocuments: [],
         workspaceFolders: [],
@@ -105,6 +108,7 @@ const vscodeMock = {
         openTextDocument: async (uri) => ({ uri, fileName: uri.fsPath, languageId: '', version: 1, isDirty: false })
     },
     window: {
+        onDidChangeWindowState: (listener) => { windowStateListeners.push(listener); return { dispose() { } }; },
         activeTextEditor: undefined,
         createStatusBarItem,
         createOutputChannel,

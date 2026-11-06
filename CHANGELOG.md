@@ -2,6 +2,8 @@
 
 **3.2.1.**
 
+The configuration panel now reuses a single tab. Local changes made while the editor was closed are discovered on project opening and window focus using successful history and a private baseline inventory. Automatic upload follows uploadOnAutoSave. An initial inventory without history does not upload the entire project.
+
 1. Local save and external edit uploads use a persistent versioned path queue. New disk changes retain newer versions without cancelling an unrelated active upload.
 2. Pending paths survive extension restarts and are isolated by connection destination. Added SFTP Retry Pending Uploads and status feedback for pending or paused uploads.
 3. Temporary upload failures receive bounded retries with increasing delays. Cancellation and persistent errors preserve pending work for a later request.

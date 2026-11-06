@@ -8,7 +8,7 @@ The extension moves local and remote files using configured FTP, FTPS, SFTP or T
 2. Saved form configuration and pending upload paths use VS Code workspace state outside the project. This ordinary configuration storage is not equivalent to SecretStorage. Inline keys, private key paths, key passphrases and connection identities may be present there.
 3. Before private form configuration is saved, registered VS Code settings provide the connection configuration. Existing user managed settings are not removed or rewritten by the extension.
 4. Delete Config clears connection fields associated with the chosen mode. It does not erase the SecretStorage password, historical settings files, synchronization history or pending upload journals.
-5. Private hash caches and per destination transfer history live in global extension storage outside the project. Downloads stage temporary files outside the workspace where the filesystem permits a safe final rename.
+5. Private hash caches, per destination transfer history and local baseline inventories live in global extension storage outside the project. Downloads stage temporary files outside the workspace where the filesystem permits a safe final rename.
 6. Removing the extension or changing VS Code profiles can affect storage availability. This documentation makes no promise of secure erasure or transfer of stored state between machines.
 
 **Connection and transfer limits.**

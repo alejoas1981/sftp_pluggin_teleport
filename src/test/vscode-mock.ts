@@ -6,6 +6,7 @@ const watchers: any[] = [];
 const commands: Record<string, (...args: any[]) => any> = {};
 const outputChannels: any[] = [];
 const willSaveListeners: ((e: any) => void)[] = [];
+const windowStateListeners: ((event: any) => void)[] = [];
 const didSaveListeners: ((doc: any) => void)[] = [];
 
 function reset() {
@@ -18,6 +19,7 @@ function reset() {
     outputChannels.length = 0;
     willSaveListeners.length = 0;
     didSaveListeners.length = 0;
+    windowStateListeners.length = 0;
 }
 
 function getValue(key: string, defaultValue?: any) {
@@ -95,6 +97,7 @@ const vscodeMock = {
     _outputChannels: outputChannels,
     _willSaveListeners: willSaveListeners,
     _didSaveListeners: didSaveListeners,
+    _windowStateListeners: windowStateListeners,
     workspace: {
         textDocuments: [] as any[],
         workspaceFolders: [] as any[],
@@ -113,6 +116,7 @@ const vscodeMock = {
         openTextDocument: async (uri: any) => ({ uri, fileName: uri.fsPath, languageId: '', version: 1, isDirty: false })
     },
     window: {
+        onDidChangeWindowState: (listener: (event: any) => void) => { windowStateListeners.push(listener); return { dispose() {} }; },
         activeTextEditor: undefined as any,
         createStatusBarItem,
         createOutputChannel,

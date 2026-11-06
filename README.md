@@ -56,7 +56,8 @@ Dry Run does not transfer files or record successful transfers. It may update pr
 6. Temporary failures identified by the queue receive up to three retries after delays of 1, 2 and 4 seconds. Permanent errors, exhausted retries and manual cancellation leave paths available for a later request. A new save or explicit retry starts a fresh retry budget.
 7. Run SFTP Retry Pending Uploads to request another batch without a full synchronization. The status bar reports pending files or the reason an upload paused.
 8. Pending paths are saved in private VS Code workspace state separately for each connection destination. After restart, automatic resumption occurs when uploadOnAutoSave is enabled. Otherwise use a manual save or the retry command. Removed local files do not trigger remote deletion in this mode.
-9. Only observed changes enter this queue. It does not discover arbitrary changes made while the extension was inactive. Files outside open workspace folders are not watched by the upload event watcher. Use an explicit file command or a reviewed synchronization for unobserved changes.
+9. Opening a configured project and returning focus to its window scan the local tree for offline changes. Successful transfer history and a private local inventory identify edited and newly created files without scanning the server. The first scan without any inventory establishes a baseline and does not upload unknown existing files. Known successful files can still be checked against their transfer history. Files deleted locally are never sent as remote deletions. With uploadOnAutoSave disabled, discovered paths wait for manual save or retry.
+10. The inventory is isolated by destination and kept outside the project. Local hashes can be reused through the existing cache. This feature scans local files and does not promise instantaneous discovery on large projects. Files outside open workspace folders can be found by this scan when they are under the configured absolute local root.
 
 Start Watching is a separate feature. It watches the configured local path and requests complete synchronization in both directions after local file events. It does not poll the server for remote changes and is not equivalent to automatic queued uploading. Use Stop Watching to stop that watcher. Upload preferences continue to govern the separate upload queue.
 
@@ -118,7 +119,7 @@ These defaults are the values declared to VS Code. Required connection strings d
 24. sftpPluggin.useRsync. Type boolean. Default false. Legacy compatibility field. Does not select a transport. SFTP uses ssh2 and Teleport always uses tsh with rsync.
 25. sftpPluggin.useTeleport. Type boolean. Default false. Legacy mode fallback used only when mode is absent. Select mode explicitly for new configurations.
 26. sftpPluggin.uploadOnSave. Type boolean. Default true. Upload queued local project changes after manual save. Local copies overwrite remote copies. Does not run two way conflict detection.
-27. sftpPluggin.uploadOnAutoSave. Type boolean. Default false. Upload queued local changes after editor Auto Save or observed workspace file events. Does not enable editor Auto Save or scan the whole project.
+27. sftpPluggin.uploadOnAutoSave. Type boolean. Default false. Upload queued local changes after editor Auto Save or observed workspace file events. Does not enable editor Auto Save. Opening or focusing the project also discovers offline local changes.
 28. sftpPluggin.showUploadButton. Type boolean. Default false. Show Upload in the editor title. After saving a private configuration, change this preference in the configuration panel.
 29. sftpPluggin.showDownloadButton. Type boolean. Default false. Show Download in the editor title. After saving a private configuration, change this preference in the configuration panel.
 30. sftpPluggin.scanConcurrency. Type integer. Default 4. Remote directory scan concurrency from 1 to 16 where individual listings are used. Full Teleport analysis uses one recursive remote command.
@@ -126,7 +127,7 @@ These defaults are the values declared to VS Code. Required connection strings d
 
 **Progress, storage and limits.**
 
-The configuration panel and status bar read shared task state. Closing the panel does not cancel a transfer. Reopening restores the current task or recent result. Use Cancel Transfer to interrupt the active transport. Pending uploads are durable, while the active task, recent logs and prepared plan are held in memory.
+The configuration panel is a single tab per extension host. Repeatedly invoking Open Configuration reveals that existing tab. Closing it allows a fresh tab to be created later. The configuration panel and status bar read shared task state. Closing the panel does not cancel a transfer. Reopening restores the current task or recent result. Use Cancel Transfer to interrupt the active transport. Pending uploads are durable, while the active task, recent logs and prepared plan are held in memory.
 
 Scanning shows stages, paths, counters and elapsed time. Transfer percentages advance as files complete, so a large active file can leave the percentage unchanged temporarily. Upload, download and session durations remain visible in results. The panel retains up to 500 recent entries with up to 2000 characters per entry. The Output channel receives the plain transfer log. Successful task progress returns to idle after a short delay.
 

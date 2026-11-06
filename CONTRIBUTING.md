@@ -17,7 +17,7 @@ The source repository is https://github.com/alejoas1981/sftp_pluggin_teleport.
 
 1. src/config.ts owns saved workspace configuration and SecretStorage password access.
 2. src/extension.ts owns commands, save events, the upload event watcher and UI integration.
-3. src/pending-uploads.ts owns persistent versioned upload paths, isolated by connection destination.
+3. src/pending-uploads.ts owns persistent versioned upload paths, isolated by connection destination. src/local-change-discovery.ts compares local files with successful history and private inventories on project opening and window focus.
 4. src/save-upload-queue.ts owns debounce, serialization and bounded retry scheduling.
 5. src/sync-engine.ts owns file analysis, plans, conflict handling and transfer execution.
 6. src/sync.ts owns FTP, SFTP and Teleport adapters, operation serialization and Teleport session recovery.
