@@ -51,7 +51,7 @@ const teleport_installer_1 = require("./teleport-installer");
 const sync_engine_1 = require("./sync-engine");
 var sync_engine_2 = require("./sync-engine");
 Object.defineProperty(exports, "SyncEngine", { enumerable: true, get: function () { return sync_engine_2.SyncEngine; } });
-const loginOptions = new Map(), recoveries = new Map();
+const loginOptions = new Map(), recoveries = new Map(), sessionChecks = new Map();
 const SESSION_CACHE_MS = 60000, remoteActionQueue = new p_queue_1.default({ concurrency: 1 });
 let cachedSession, activeTransferController;
 function cancelActiveTransfer() {
@@ -781,10 +781,10 @@ async function withRemoteClient(config, action) {
         controller.signal.addEventListener('abort', onAbort, { once: true });
         try {
             for (let attempt = 0;; attempt++) {
+                if ((0, config_1.resolveMode)(config) === 'teleport') {
+                    await Promise.race([ensureTeleportSession(config), cancellation]);
+                }
                 try {
-                    if ((0, config_1.resolveMode)(config) === 'teleport') {
-                        await ensureTeleportSession(config);
-                    }
                     if (controller.signal.aborted) {
                         throw new Error('Transfer cancelled');
                     }
@@ -893,12 +893,19 @@ async function syncFile(config, localPath) {
 }
 /**
  * Runs tsh status to verify the Teleport session.
- * @param _config - The SFTP configuration (unused).
+ * @param config - The Teleport profile to check.
  * @returns {Promise<string>} The tsh status output.
  */
-async function testTeleport(_config) {
+async function testTeleport(config) {
     const tshPath = await (0, teleport_installer_1.ensureTsh)();
-    return spawnCommand(tshPath, ['status'], { env: process.env });
+    const args = ['status'];
+    if (config.teleportHost) {
+        args.push(`--proxy=${config.teleportHost}`);
+    }
+    if (config.teleportUser) {
+        args.push(`--user=${config.teleportUser}`);
+    }
+    return spawnCommand(tshPath, args, { env: process.env });
 }
 /**
  * Tests the configured connection for the current mode.
@@ -964,22 +971,24 @@ async function loginToTeleport(config, options = {}) {
                     }).catch((error) => { child.kill(); reject(error); });
                 }
             }
-            if (options.onLink) {
-                const proxyHost = config.teleportHost
-                    ? config.teleportHost.replace(/^https?:\/\//, '').split('/')[0]
-                    : undefined;
-                const matches = text.match(/https?:\/\/[^\s]+/g);
-                const url = matches?.find((u) => !proxyHost || u.includes(proxyHost.split(':')[0]))
-                    || matches?.[0];
-                if (url && !linkSent) {
-                    linkSent = true;
-                    options.onLink(url);
-                }
-            }
             return text;
         };
-        child.stdout.on('data', (data) => { stdout += handleData(data); });
-        child.stderr.on('data', (data) => { stderr += handleData(data); });
+        /** Opens the first complete browser authentication URL emitted by tsh. */
+        const forwardLink = (output) => {
+            if (linkSent) {
+                return;
+            }
+            const url = findTeleportLoginLink(output);
+            if (url) {
+                const onLink = options.onLink ?? loginOptions.get(teleportSessionKey(config))?.onLink;
+                if (onLink) {
+                    linkSent = true;
+                    onLink(url);
+                }
+            }
+        };
+        child.stdout.on('data', (data) => { stdout += handleData(data); forwardLink(stdout); });
+        child.stderr.on('data', (data) => { stderr += handleData(data); forwardLink(stderr); });
         child.on('error', (error) => { clearTimeout(timeout); reject(error); });
         child.on('close', (code) => {
             clearTimeout(timeout);
@@ -988,13 +997,32 @@ async function loginToTeleport(config, options = {}) {
                 reject(new Error(message));
                 return;
             }
+            forwardLink(stdout + '\n');
+            forwardLink(stderr + '\n');
             resolve(stdout.trim());
         });
     });
 }
+/** Finds a browser login URL while discarding health checks and diagnostic URLs. */
+function findTeleportLoginLink(output) {
+    for (const match of output.matchAll(/https?:\/\/[^\s"'<>]+(?=[\s"'<>])/g)) {
+        try {
+            const url = new URL(match[0]), beforeUrl = output.slice(0, match.index), line = beforeUrl.trimEnd().split('\n').pop() ?? '', loopback = ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
+            if (url.pathname.startsWith('/webapi/ping') || url.pathname.startsWith('/webapi/find')) {
+                continue;
+            }
+            if (loopback || /authenticate|open.*browser|visit|follow.*link|use the following url/i.test(line)
+                || /(?:^|\/)login(?:\/|$)/i.test(url.pathname)) {
+                return match[0];
+            }
+        }
+        catch { /* Ignore malformed URLs in CLI diagnostics. */ }
+    }
+    return undefined;
+}
 /** Identifies credential and trust failures that can justify one renewed session. */
 function isTeleportAuthenticationError(error) {
-    return /x509: certificate signed by unknown authority|certificate.*expired|session.*expired|not logged in|relogin/i.test(error instanceof Error ? error.message : String(error));
+    return /x509: certificate signed by unknown authority|certificate.*expired|session.*expired|credentials.*expired|not logged in|relogin|please login using tsh login/i.test(error instanceof Error ? error.message : String(error));
 }
 /** Identifies the proxy profile shared by login and transfer recovery. */
 function teleportSessionKey(config) {
@@ -1044,20 +1072,31 @@ async function ensureTeleportSession(config, options = {}) {
     if (cachedSession && cachedSession.configKey === key && Date.now() < cachedSession.validUntil) {
         return cachedSession.output;
     }
-    try {
-        const out = await testTeleport(config);
-        const lowerOut = out.toLowerCase();
-        if (['not logged in', 'expired', 'relogin', 'session expired'].some((msg) => lowerOut.includes(msg))) {
-            throw new Error('Teleport session not active');
+    const checking = sessionChecks.get(key);
+    if (checking) {
+        return checking;
+    }
+    const check = (async () => {
+        let out;
+        try {
+            out = await testTeleport(config);
+            if (/not logged in|expired|relogin/i.test(out)) {
+                throw new Error('Teleport session not active');
+            }
+        }
+        catch (error) {
+            out = isTeleportAuthenticationError(error) && /x509/i.test(String(error))
+                ? await recoverTeleportSession(config) : await loginToTeleport(config, loginOptions.get(key) ?? options);
         }
         cachedSession = { configKey: key, output: out, validUntil: Date.now() + SESSION_CACHE_MS };
         return out;
+    })();
+    sessionChecks.set(key, check);
+    try {
+        return await check;
     }
-    catch (error) {
-        const out = isTeleportAuthenticationError(error)
-            ? await recoverTeleportSession(config) : await loginToTeleport(config, options);
-        cachedSession = { configKey: key, output: out, validUntil: Date.now() + SESSION_CACHE_MS };
-        return out;
+    finally {
+        sessionChecks.delete(key);
     }
 }
 /**

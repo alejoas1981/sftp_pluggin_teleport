@@ -10,7 +10,8 @@ import { loadSync } from '../../test/proxyquire-helper.cjs';
 
 describe('Teleport compatibility with private cache and concurrent scanning', () => {
     let local: string, storage: string, teleport: any, loggedIn: boolean, failTransfer: boolean,
-        activeListings: number, peakListings: number, authFailures: number;
+        activeListings: number, peakListings: number, authFailures: number,
+        loginGate: Promise<void> | undefined;
     const remote = new Map<string, string>(), directories = new Set<string>(), calls: Array<{ command: string; args: string[] }> = [],
         config = () => ({ mode: 'teleport', teleportHost: 'proxy.example.test', teleportUser: 'login-user',
             teleportCluster: 'cluster-one', sftpHost: 'node', sftpUser: 'deploy', remotePath: '/remote', localPath: local,
@@ -21,6 +22,7 @@ describe('Teleport compatibility with private cache and concurrent scanning', ()
         storage = fs.mkdtempSync(path.join(os.tmpdir(), 'teleport-state-'));
         configureStorage(storage);
         remote.clear(); directories.clear(); directories.add('/remote'); calls.length = 0;
+        loginGate = undefined;
         loggedIn = true; failTransfer = false; authFailures = 0; activeListings = 0; peakListings = 0;
         const spawn = (command: string, args: string[], options: { cwd?: string; input?: string | Buffer } = {}) => {
             const child: any = new EventEmitter();
@@ -31,11 +33,19 @@ describe('Teleport compatibility with private cache and concurrent scanning', ()
             const operation = args[args.length - 1], listing = command === 'tsh' && operation.includes('find '),
                 recursiveListing = listing && !operation.includes('-maxdepth 1');
             if (listing) { activeListings++; peakListings = Math.max(peakListings, activeListings); }
-            setTimeout(() => {
+            setTimeout(async () => {
                 let output = '', failure = '';
                 if (command === 'tsh') {
-                    if (args[0] === 'status') { output = loggedIn ? 'Logged in' : 'not logged in'; }
-                    else if (args[0] === 'login') { loggedIn = true; output = 'https://proxy.example.test/login'; }
+                    if (args[0] === 'status') { output = loggedIn ? 'Logged in' : loginGate ? 'Valid until: 2020-01-01 [EXPIRED]' : 'not logged in'; }
+                    else if (args[0] === 'login') {
+                        if (loginGate) {
+                            child.stderr.emit('data', Buffer.from('Get "https://proxy.example.test:3080/webapi/ping": diagnostic\n'));
+                            child.stdout.emit('data', Buffer.from('Use the following URL to authenticate:\nhttp://127.0.0.1:'));
+                            child.stdout.emit('data', Buffer.from('54321/auth/token\n'));
+                            await loginGate;
+                        } else { output = 'https://proxy.example.test/login'; }
+                        loggedIn = true;
+                    }
                     else if (listing) {
                         const directory = operation.match(/find '([^']+)'/)![1];
                         for (const file of [...directories, ...remote.keys()]) {
@@ -147,6 +157,28 @@ describe('Teleport compatibility with private cache and concurrent scanning', ()
         await teleport.runSync(config(), { dryRun: true });
         const login = calls.find((call) => call.args[0] === 'login')!;
         expect(login.args).to.include.members(['--proxy=proxy.example.test', '--user=login-user', 'cluster-one']);
+    });
+
+    it('shares expired session login and waits for browser authentication before queued uploads', async () => {
+        loggedIn = false;
+        fs.writeFileSync(path.join(local, 'pending.txt'), 'latest');
+        let finishLogin!: () => void, receiveLink!: (url: string) => void;
+        loginGate = new Promise<void>((resolve) => { finishLogin = resolve; });
+        const link = new Promise<string>((resolve) => { receiveLink = resolve; }),
+            links: string[] = [],
+            startup = teleport.ensureTeleportSession(config(), { onLink: (url: string) => { links.push(url); receiveLink(url); } }),
+            upload = teleport.uploadChangedFiles(config(), { files: ['pending.txt'] });
+        try {
+            expect(await link).to.equal('http://127.0.0.1:54321/auth/token');
+            expect(calls.filter((call) => call.args[0] === 'login')).to.have.length(1);
+            expect(calls.some((call) => call.args[0] === 'ssh' || call.command === 'rsync')).to.equal(false);
+        } finally {
+            finishLogin();
+            await Promise.all([startup, upload]);
+        }
+        expect(links).to.deep.equal(['http://127.0.0.1:54321/auth/token']);
+        expect(calls.filter((call) => call.args[0] === 'login')).to.have.length(1);
+        expect(remote.get('/remote/pending.txt')).to.equal('latest');
     });
 
     it('keeps browser login links and explicit remote deletion available', async () => {

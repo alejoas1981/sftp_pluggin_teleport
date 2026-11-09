@@ -27427,6 +27427,7 @@ Automatic deletion: disabled`;
 // src/sync.ts
 var loginOptions = /* @__PURE__ */ new Map();
 var recoveries = /* @__PURE__ */ new Map();
+var sessionChecks = /* @__PURE__ */ new Map();
 var SESSION_CACHE_MS = 6e4;
 var remoteActionQueue = new import_p_queue.default({ concurrency: 1 });
 var cachedSession;
@@ -28131,10 +28132,10 @@ async function withRemoteClient(config, action) {
     controller.signal.addEventListener("abort", onAbort, { once: true });
     try {
       for (let attempt = 0; ; attempt++) {
+        if (resolveMode(config) === "teleport") {
+          await Promise.race([ensureTeleportSession(config), cancellation]);
+        }
         try {
-          if (resolveMode(config) === "teleport") {
-            await ensureTeleportSession(config);
-          }
           if (controller.signal.aborted) {
             throw new Error("Transfer cancelled");
           }
@@ -28203,9 +28204,16 @@ async function syncFile(config, localPath) {
   getRemotePath(config, localPath);
   return runSync(config, { files: [path7.relative(config.localPath, localPath).replace(/\\/g, "/")] });
 }
-async function testTeleport(_config) {
+async function testTeleport(config) {
   const tshPath = await ensureTsh();
-  return spawnCommand(tshPath, ["status"], { env: process.env });
+  const args = ["status"];
+  if (config.teleportHost) {
+    args.push(`--proxy=${config.teleportHost}`);
+  }
+  if (config.teleportUser) {
+    args.push(`--user=${config.teleportUser}`);
+  }
+  return spawnCommand(tshPath, args, { env: process.env });
 }
 async function testConnection(config) {
   const mode = resolveMode(config);
@@ -28264,22 +28272,29 @@ async function loginToTeleport(config, options = {}) {
           });
         }
       }
-      if (options.onLink) {
-        const proxyHost = config.teleportHost ? config.teleportHost.replace(/^https?:\/\//, "").split("/")[0] : void 0;
-        const matches = text.match(/https?:\/\/[^\s]+/g);
-        const url = (matches == null ? void 0 : matches.find((u2) => !proxyHost || u2.includes(proxyHost.split(":")[0]))) || (matches == null ? void 0 : matches[0]);
-        if (url && !linkSent) {
+      return text;
+    };
+    const forwardLink = (output) => {
+      var _a;
+      if (linkSent) {
+        return;
+      }
+      const url = findTeleportLoginLink(output);
+      if (url) {
+        const onLink = options.onLink ?? ((_a = loginOptions.get(teleportSessionKey(config))) == null ? void 0 : _a.onLink);
+        if (onLink) {
           linkSent = true;
-          options.onLink(url);
+          onLink(url);
         }
       }
-      return text;
     };
     child.stdout.on("data", (data) => {
       stdout += handleData(data);
+      forwardLink(stdout);
     });
     child.stderr.on("data", (data) => {
       stderr += handleData(data);
+      forwardLink(stderr);
     });
     child.on("error", (error) => {
       clearTimeout(timeout);
@@ -28292,12 +28307,29 @@ async function loginToTeleport(config, options = {}) {
         reject(new Error(message));
         return;
       }
+      forwardLink(stdout + "\n");
+      forwardLink(stderr + "\n");
       resolve3(stdout.trim());
     });
   });
 }
+function findTeleportLoginLink(output) {
+  for (const match of output.matchAll(/https?:\/\/[^\s"'<>]+(?=[\s"'<>])/g)) {
+    try {
+      const url = new URL(match[0]), beforeUrl = output.slice(0, match.index), line = beforeUrl.trimEnd().split("\n").pop() ?? "", loopback = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
+      if (url.pathname.startsWith("/webapi/ping") || url.pathname.startsWith("/webapi/find")) {
+        continue;
+      }
+      if (loopback || /authenticate|open.*browser|visit|follow.*link|use the following url/i.test(line) || /(?:^|\/)login(?:\/|$)/i.test(url.pathname)) {
+        return match[0];
+      }
+    } catch {
+    }
+  }
+  return void 0;
+}
 function isTeleportAuthenticationError(error) {
-  return /x509: certificate signed by unknown authority|certificate.*expired|session.*expired|not logged in|relogin/i.test(error instanceof Error ? error.message : String(error));
+  return /x509: certificate signed by unknown authority|certificate.*expired|session.*expired|credentials.*expired|not logged in|relogin|please login using tsh login/i.test(error instanceof Error ? error.message : String(error));
 }
 function teleportSessionKey(config) {
   return JSON.stringify([config.teleportHost, config.teleportUser, config.teleportCluster]);
@@ -28338,18 +28370,28 @@ async function ensureTeleportSession(config, options = {}) {
   if (cachedSession && cachedSession.configKey === key && Date.now() < cachedSession.validUntil) {
     return cachedSession.output;
   }
-  try {
-    const out = await testTeleport(config);
-    const lowerOut = out.toLowerCase();
-    if (["not logged in", "expired", "relogin", "session expired"].some((msg) => lowerOut.includes(msg))) {
-      throw new Error("Teleport session not active");
+  const checking = sessionChecks.get(key);
+  if (checking) {
+    return checking;
+  }
+  const check = (async () => {
+    let out;
+    try {
+      out = await testTeleport(config);
+      if (/not logged in|expired|relogin/i.test(out)) {
+        throw new Error("Teleport session not active");
+      }
+    } catch (error) {
+      out = isTeleportAuthenticationError(error) && /x509/i.test(String(error)) ? await recoverTeleportSession(config) : await loginToTeleport(config, loginOptions.get(key) ?? options);
     }
     cachedSession = { configKey: key, output: out, validUntil: Date.now() + SESSION_CACHE_MS };
     return out;
-  } catch (error) {
-    const out = isTeleportAuthenticationError(error) ? await recoverTeleportSession(config) : await loginToTeleport(config, options);
-    cachedSession = { configKey: key, output: out, validUntil: Date.now() + SESSION_CACHE_MS };
-    return out;
+  })();
+  sessionChecks.set(key, check);
+  try {
+    return await check;
+  } finally {
+    sessionChecks.delete(key);
   }
 }
 function validateConfig(config) {
