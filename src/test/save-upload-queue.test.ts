@@ -32,7 +32,7 @@ describe('save upload queue', () => {
     });
     it('recovers automatically and disposal cancels a scheduled retry', async () => {
         let runs = 0;
-        const queue = new SaveUploadQueue(async () => { if (++runs === 1) { throw new Error('ECONNRESET'); } },
+        const queue = new SaveUploadQueue(async () => { if (++runs === 1) { throw new Error('Teleport login failed. Get /webapi/ping: context deadline exceeded (Client.Timeout exceeded while awaiting headers)'); } },
             () => false, () => { throw new Error('unexpected terminal failure'); }, () => 1, 5);
         queue.request(); await pause(); expect(runs).to.equal(2); queue.dispose();
         const stopped = new SaveUploadQueue(async () => { runs++; throw new Error('offline'); },

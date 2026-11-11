@@ -121,6 +121,26 @@ describe('extension', () => {
         expect(batches).to.deep.equal([['focus.txt']]);
     });
 
+    it('retains queued files when the Teleport proxy times out before login', async () => {
+        Object.assign((vscode as any)._values, { mode: 'teleport', teleportHost: 'proxy.example.test', uploadOnAutoSave: true });
+        const file = path.join(tempDir, 'pending.txt'), batches: string[][] = [];
+        let available = false;
+        syncMock.ensureTeleportSession = async () => {
+            if (!available) { throw new Error('Get /webapi/ping: context deadline exceeded'); }
+            return 'logged in';
+        };
+        syncMock.uploadChangedFiles = async (_config: any, options: any) => { batches.push(options.files); return 'done'; };
+        await ext.activate(context);
+        (vscode as any)._watchers[0]._trigger('didChange', vscode.Uri.file(file));
+        await new Promise((resolve) => setTimeout(resolve, 130));
+        expect(batches).to.deep.equal([]);
+        expect((vscode as any)._statusBarItems[0].text).to.equal('$(warning) SFTP waiting for Teleport');
+        available = true;
+        (vscode as any)._commands['sftpPluggin.retryUploads']();
+        await new Promise((resolve) => setTimeout(resolve, 130));
+        expect(batches).to.deep.equal([['pending.txt']]);
+    });
+
     it('syncNow command runs sync', async () => {
         await ext.activate(context);
 

@@ -28304,7 +28304,7 @@ async function loginToTeleport(config, options = {}) {
       clearTimeout(timeout);
       if (code !== 0) {
         const message = stderr.trim() || stdout.trim() || `tsh login exited with code ${code}`;
-        reject(new Error(message));
+        reject(new Error(message.replace(/\u001B\[[0-?]*[ -/]*[@-~]/g, "")));
         return;
       }
       forwardLink(stdout + "\n");
@@ -28768,7 +28768,7 @@ var SaveUploadQueue = class {
       await this.run();
       this.attempts = 0;
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error), temporary = /offline|ECONN|ETIMEDOUT|EPIPE|connection.*(?:lost|reset|closed|error)|socket|temporarily unavailable|File changed|status 255/i.test(message);
+      const message = error instanceof Error ? error.message : String(error), temporary = /offline|ECONN|ETIMEDOUT|context deadline exceeded|timeout exceeded while awaiting headers|EPIPE|connection.*(?:lost|reset|closed|error)|socket|temporarily unavailable|File changed|status 255/i.test(message);
       if (temporary && !/x509|certificate|permission denied|authentication|Transfer cancelled/i.test(message) && this.attempts < this.retryLimit) {
         wait = this.retryDelay * 2 ** this.attempts++;
         this.pending = true;
@@ -29011,8 +29011,8 @@ Files: ${state.current}/${state.total ?? "?"} | Local: ${state.localFiles} | Rem
     () => syncInProgress,
     (error) => {
       outputChannel.appendLine(`[save upload error] ${error.message}`);
-      updateSftpStatus("$(warning) SFTP upload paused", `${pendingUploads.entries(getConfiguration()).size} pending files. ${error.message}`);
-      vscode4.window.showErrorMessage(`SFTP upload paused with ${pendingUploads.entries(getConfiguration()).size} pending files. ${error.message}. Pending files retained. Use SFTP Retry Pending Uploads or save again.`);
+      updateSftpStatus("$(warning) SFTP queue paused", `${pendingUploads.entries(getConfiguration()).size} pending files. ${error.message}`);
+      vscode4.window.showErrorMessage(`SFTP queue paused with ${pendingUploads.entries(getConfiguration()).size} pending files. ${error.message}. Pending files retained. Use SFTP Retry Pending Uploads or save again.`);
     },
     () => Math.max(50, getConfiguration().debounceMs ?? 300)
   );
@@ -29097,8 +29097,11 @@ async function autoLogin() {
     return;
   }
   startLoading();
-  await ensureTeleportIfNeeded(config);
-  stopLoading();
+  try {
+    await ensureTeleportIfNeeded(config);
+  } finally {
+    stopLoading();
+  }
 }
 async function loadConfig() {
   const base = getConfiguration(), password = await getPassword(extensionContext);
@@ -29493,6 +29496,20 @@ async function uploadSavedChanges() {
     saveUploads == null ? void 0 : saveUploads.request();
     return;
   }
+  if (resolveMode(config) === "teleport") {
+    updateSftpStatus("$(sync~spin) SFTP waiting for Teleport", "Checking the Teleport session before starting uploads.");
+    try {
+      await ensureTeleportIfNeeded(config);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      updateSftpStatus("$(warning) SFTP waiting for Teleport", message);
+      throw new Error(`Teleport login failed. ${message}`);
+    }
+  }
+  if (syncInProgress) {
+    saveUploads == null ? void 0 : saveUploads.request();
+    return;
+  }
   syncInProgress = true;
   syncTask.start(false);
   try {
@@ -29510,7 +29527,7 @@ async function uploadSavedChanges() {
     }
     syncTask.log("UPLOAD: locally changed files only; no remote tree scan.\n");
     await pendingUploads.flush();
-    await ensureTeleportIfNeeded(config);
+    syncTask.update({ phase: "Preparing uploads" });
     const batch = new Map([...pendingUploads.entries(config)].filter(([file]) => isUploadPath(config, file))), root = resolveLocalRoot(config), result = await uploadChangedFiles(config, {
       files: [...batch.keys()].map((file) => path10.relative(root, file).replace(/\\/g, "/")),
       onLog: (text) => {

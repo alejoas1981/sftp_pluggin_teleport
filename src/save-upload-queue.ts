@@ -32,7 +32,7 @@ export class SaveUploadQueue {
         try { await this.run(); this.attempts = 0; }
         catch (error) {
             const message = error instanceof Error ? error.message : String(error),
-                temporary = /offline|ECONN|ETIMEDOUT|EPIPE|connection.*(?:lost|reset|closed|error)|socket|temporarily unavailable|File changed|status 255/i.test(message);
+                temporary = /offline|ECONN|ETIMEDOUT|context deadline exceeded|timeout exceeded while awaiting headers|EPIPE|connection.*(?:lost|reset|closed|error)|socket|temporarily unavailable|File changed|status 255/i.test(message);
             if (temporary && !/x509|certificate|permission denied|authentication|Transfer cancelled/i.test(message) && this.attempts < this.retryLimit) {
                 wait = this.retryDelay * 2 ** this.attempts++;
                 this.pending = true;

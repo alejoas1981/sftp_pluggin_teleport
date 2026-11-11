@@ -1052,7 +1052,7 @@ export async function loginToTeleport(config: SftpConfig, options: LoginOptions 
             clearTimeout(timeout);
             if (code !== 0) {
                 const message = stderr.trim() || stdout.trim() || `tsh login exited with code ${code}`;
-                reject(new Error(message));
+                reject(new Error(message.replace(/\u001B\[[0-?]*[ -/]*[@-~]/g, '')));
                 return;
             }
             forwardLink(stdout + '\n');

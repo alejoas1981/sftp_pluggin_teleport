@@ -72,8 +72,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     saveUploads = new SaveUploadQueue(uploadSavedChanges, () => syncInProgress,
         (error: any) => {
             outputChannel.appendLine(`[save upload error] ${error.message}`);
-            updateSftpStatus('$(warning) SFTP upload paused', `${pendingUploads.entries(getConfiguration()).size} pending files. ${error.message}`);
-            vscode.window.showErrorMessage(`SFTP upload paused with ${pendingUploads.entries(getConfiguration()).size} pending files. ${error.message}. Pending files retained. Use SFTP Retry Pending Uploads or save again.`);
+            updateSftpStatus('$(warning) SFTP queue paused', `${pendingUploads.entries(getConfiguration()).size} pending files. ${error.message}`);
+            vscode.window.showErrorMessage(`SFTP queue paused with ${pendingUploads.entries(getConfiguration()).size} pending files. ${error.message}. Pending files retained. Use SFTP Retry Pending Uploads or save again.`);
         }, () => Math.max(50, getConfiguration().debounceMs ?? 300));
     const uploadWatcher = vscode.workspace.createFileSystemWatcher('**/*', false, false, false),
         onDiskChange = (uri: vscode.Uri) => {
@@ -144,8 +144,8 @@ async function autoLogin(): Promise<void> {
         return;
     }
     startLoading();
-    await ensureTeleportIfNeeded(config);
-    stopLoading();
+    try { await ensureTeleportIfNeeded(config); }
+    finally { stopLoading(); }
 }
 
 /**
@@ -638,6 +638,16 @@ function isUploadPath(config: SftpConfig, file: string): boolean {
 async function uploadSavedChanges(): Promise<void> {
     const config = await loadConfig();
     if (syncInProgress) { saveUploads?.request(); return; }
+    if (resolveMode(config) === 'teleport') {
+        updateSftpStatus('$(sync~spin) SFTP waiting for Teleport', 'Checking the Teleport session before starting uploads.');
+        try { await ensureTeleportIfNeeded(config); }
+        catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            updateSftpStatus('$(warning) SFTP waiting for Teleport', message);
+            throw new Error(`Teleport login failed. ${message}`);
+        }
+    }
+    if (syncInProgress) { saveUploads?.request(); return; }
     syncInProgress = true;
     syncTask.start(false);
     try {
@@ -652,7 +662,7 @@ async function uploadSavedChanges(): Promise<void> {
         } finally { savingBatch = false; }
         syncTask.log('UPLOAD: locally changed files only; no remote tree scan.\n');
         await pendingUploads.flush();
-        await ensureTeleportIfNeeded(config);
+        syncTask.update({ phase: 'Preparing uploads' });
         const batch = new Map([...pendingUploads.entries(config)].filter(([file]) => isUploadPath(config, file))),
             root = resolveLocalRoot(config),
             result = await uploadChangedFiles(config, {
