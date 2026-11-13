@@ -53,6 +53,35 @@ function privateContext() {
     return context;
 }
 
+describe('Teleport destination fallback', () => {
+    it('uses settings for missing destination fields while retaining saved values', async () => {
+        const context = privateContext(), values = (vscode as any)._values;
+        values.sftpHost = 'node.example.test'; values.sftpUser = 'colleague';
+        initializeConfiguration(context);
+        await context.workspaceState.update('sftpPluggin.privateConfiguration', { ...base, sftpHost: '', sftpUser: undefined });
+        expect(getConfiguration()).to.include({ sftpHost: 'node.example.test', sftpUser: 'colleague' });
+        await saveConfiguration(context, { ...base, sftpHost: 'saved-node', sftpUser: 'saved-user' });
+        expect(getConfiguration()).to.include({ sftpHost: 'saved-node', sftpUser: 'saved-user' });
+        await saveConfiguration(context, { ...base, sftpHost: '', sftpUser: '' });
+        expect(getConfiguration()).to.include({ sftpHost: '', sftpUser: '' });
+        delete values.sftpHost; delete values.sftpUser;
+    });
+});
+
+describe('upload preferences in the configuration panel', () => {
+    it('migrates existing settings and preserves saved preferences independently', async () => {
+        const context = privateContext(), values = (vscode as any)._values;
+        values.uploadOnSave = false; values.uploadOnAutoSave = true;
+        initializeConfiguration(context);
+        await saveConfiguration(context, base);
+        expect(getConfiguration()).to.include({ uploadOnSave: false, uploadOnAutoSave: true });
+        await saveConfiguration(context, { ...base, uploadOnSave: true, uploadOnAutoSave: false });
+        values.uploadOnSave = false; values.uploadOnAutoSave = true;
+        expect(getConfiguration()).to.include({ uploadOnSave: true, uploadOnAutoSave: false });
+        delete values.uploadOnSave; delete values.uploadOnAutoSave;
+    });
+});
+
 describe('saveConfiguration', () => {
     it('stores GUI fields privately without writing workspace settings', async () => {
         const context = privateContext();

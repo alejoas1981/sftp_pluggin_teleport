@@ -80,7 +80,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             if (uri.scheme !== 'file' || !isUploadPath(getConfiguration(), uri.fsPath)) { return; }
             recordPendingUpload(uri.fsPath);
             if (!savingBatch) {
-                const autoUpload = vscode.workspace.getConfiguration('sftpPluggin').get<boolean>('uploadOnAutoSave', false);
+                const autoUpload = getConfiguration().uploadOnAutoSave === true;
                 if (autoUpload) { saveUploads?.request(); }
             }
         };
@@ -90,7 +90,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     context.subscriptions.push(uploadWatcher, saveUploads, vscode.window.onDidChangeWindowState((state) => {
         if (state.focused) { void discoverLocalUploads(); }
     }));
-    if (pendingUploads.entries(getConfiguration()).size && vscode.workspace.getConfiguration('sftpPluggin').get<boolean>('uploadOnAutoSave', false)) {
+    if (pendingUploads.entries(getConfiguration()).size && getConfiguration().uploadOnAutoSave === true) {
         saveUploads.request();
     }
 
@@ -123,7 +123,7 @@ function discoverLocalUploads(): Promise<void> {
         if (!syncInProgress && !journal.entries(config).size) { stopLoading(); }
         if (count || journal.entries(config).size) {
             if (!syncInProgress) { updateSftpStatus('$(cloud-upload) SFTP pending', `${journal.entries(config).size} files waiting to upload`); }
-            if (vscode.workspace.getConfiguration('sftpPluggin').get<boolean>('uploadOnAutoSave', false)) { saveUploads?.request(); }
+            if (getConfiguration().uploadOnAutoSave === true) { saveUploads?.request(); }
         }
     }).catch((error: Error) => {
         if (controller.signal.aborted) { return; }
@@ -595,9 +595,9 @@ function handleDocumentSave(doc: vscode.TextDocument): void {
     saveReasons.delete(uri);
 
     if (isUploadPath(getConfiguration(), doc.fileName)) { recordPendingUpload(doc.fileName); }
-    const settings = vscode.workspace.getConfiguration('sftpPluggin'),
-        uploadOnSave = settings.get<boolean>('uploadOnSave', true),
-        uploadOnAutoSave = settings.get<boolean>('uploadOnAutoSave', false);
+    const settings = getConfiguration(),
+        uploadOnSave = settings.uploadOnSave !== false,
+        uploadOnAutoSave = settings.uploadOnAutoSave === true;
 
     const isManual = reason === vscode.TextDocumentSaveReason.Manual,
         isAuto = reason === vscode.TextDocumentSaveReason.AfterDelay || reason === vscode.TextDocumentSaveReason.FocusOut;

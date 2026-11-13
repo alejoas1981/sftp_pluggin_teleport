@@ -23149,6 +23149,8 @@ var scalarSettings = [
   { key: "useTeleport", loadDefault: false },
   { key: "ftpPassive", loadDefault: true, saveValue: (v2) => v2 ?? true },
   { key: "ftpSecure", loadDefault: false, saveValue: (v2) => v2 ?? false },
+  { key: "uploadOnSave", loadDefault: true },
+  { key: "uploadOnAutoSave", loadDefault: false },
   { key: "showUploadButton", loadDefault: false, saveValue: (v2) => v2 ?? false },
   { key: "showDownloadButton", loadDefault: false, saveValue: (v2) => v2 ?? false },
   { key: "ignore", loadDefault: [], saveValue: (v2) => v2 ?? [] },
@@ -23165,7 +23167,17 @@ function resolveMode(config) {
 function getConfiguration() {
   const stored = configurationState == null ? void 0 : configurationState.get(privateConfigKey);
   if (stored !== void 0) {
-    return { ...stored, ignore: stored.ignore ? [...stored.ignore] : [] };
+    const settings = vscode.workspace.getConfiguration(section), result2 = {
+      ...stored,
+      ignore: stored.ignore ? [...stored.ignore] : [],
+      uploadOnSave: stored.uploadOnSave ?? settings.get("uploadOnSave", true),
+      uploadOnAutoSave: stored.uploadOnAutoSave ?? settings.get("uploadOnAutoSave", false)
+    };
+    if (resolveMode(result2) === "teleport" && stored.uploadOnSave === void 0 && stored.uploadOnAutoSave === void 0) {
+      result2.sftpHost = result2.sftpHost || settings.get("sftpHost");
+      result2.sftpUser = result2.sftpUser || settings.get("sftpUser");
+    }
+    return result2;
   }
   const cfg = vscode.workspace.getConfiguration(section), mode = resolveMode({
     mode: cfg.get("mode"),
@@ -23177,12 +23189,12 @@ function getConfiguration() {
   return result;
 }
 async function saveConfiguration(context, config) {
-  const mode = resolveMode(config), saved = { mode };
+  const mode = resolveMode(config), saved = { mode }, previous = getConfiguration();
   for (const { key, saveValue } of scalarSettings) {
     if (key === "useTeleport") {
       continue;
     }
-    const raw = config[key];
+    const raw = key === "uploadOnSave" || key === "uploadOnAutoSave" ? config[key] ?? previous[key] : config[key];
     saved[key] = saveValue ? saveValue(raw) : raw;
   }
   saved.useTeleport = mode === "teleport";
@@ -29022,7 +29034,7 @@ Files: ${state.current}/${state.total ?? "?"} | Local: ${state.localFiles} | Rem
     }
     recordPendingUpload(uri.fsPath);
     if (!savingBatch) {
-      const autoUpload = vscode4.workspace.getConfiguration("sftpPluggin").get("uploadOnAutoSave", false);
+      const autoUpload = getConfiguration().uploadOnAutoSave === true;
       if (autoUpload) {
         saveUploads == null ? void 0 : saveUploads.request();
       }
@@ -29036,7 +29048,7 @@ Files: ${state.current}/${state.total ?? "?"} | Local: ${state.localFiles} | Rem
       void discoverLocalUploads();
     }
   }));
-  if (pendingUploads.entries(getConfiguration()).size && vscode4.workspace.getConfiguration("sftpPluggin").get("uploadOnAutoSave", false)) {
+  if (pendingUploads.entries(getConfiguration()).size && getConfiguration().uploadOnAutoSave === true) {
     saveUploads.request();
   }
   const restoredCount = pendingUploads.entries(getConfiguration()).size;
@@ -29075,7 +29087,7 @@ function discoverLocalUploads() {
       if (!syncInProgress) {
         updateSftpStatus("$(cloud-upload) SFTP pending", `${journal.entries(config).size} files waiting to upload`);
       }
-      if (vscode4.workspace.getConfiguration("sftpPluggin").get("uploadOnAutoSave", false)) {
+      if (getConfiguration().uploadOnAutoSave === true) {
         saveUploads == null ? void 0 : saveUploads.request();
       }
     }
@@ -29452,7 +29464,7 @@ function handleDocumentSave(doc) {
   if (isUploadPath(getConfiguration(), doc.fileName)) {
     recordPendingUpload(doc.fileName);
   }
-  const settings = vscode4.workspace.getConfiguration("sftpPluggin"), uploadOnSave = settings.get("uploadOnSave", true), uploadOnAutoSave = settings.get("uploadOnAutoSave", false);
+  const settings = getConfiguration(), uploadOnSave = settings.uploadOnSave !== false, uploadOnAutoSave = settings.uploadOnAutoSave === true;
   const isManual = reason === vscode4.TextDocumentSaveReason.Manual, isAuto = reason === vscode4.TextDocumentSaveReason.AfterDelay || reason === vscode4.TextDocumentSaveReason.FocusOut;
   if (isManual && !uploadOnSave) {
     return;

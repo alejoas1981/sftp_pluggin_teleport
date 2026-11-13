@@ -160,6 +160,8 @@ function loadConfig(config) {
     if (ftpPassiveEl) { ftpPassiveEl.checked = config.ftpPassive !== false; }
     if (ftpSecureEl) { ftpSecureEl.checked = !!config.ftpSecure; }
     document.getElementById('verifyContents').checked = !!config.verifyContents;
+    document.getElementById('uploadOnSave').checked = config.uploadOnSave !== false;
+    document.getElementById('uploadOnAutoSave').checked = config.uploadOnAutoSave === true;
     if (showUploadEl) { showUploadEl.checked = config.showUploadButton === true; }
     if (showDownloadEl) { showDownloadEl.checked = config.showDownloadButton === true; }
     updateModeFields();
@@ -204,6 +206,8 @@ function readConfig() {
     config.ftpPassive = ftpPassiveEl ? ftpPassiveEl.checked : true;
     config.ftpSecure = ftpSecureEl ? ftpSecureEl.checked : false;
     config.verifyContents = document.getElementById('verifyContents').checked;
+    config.uploadOnSave = document.getElementById('uploadOnSave').checked;
+    config.uploadOnAutoSave = document.getElementById('uploadOnAutoSave').checked;
     config.showUploadButton = showUploadEl ? showUploadEl.checked : false;
     config.showDownloadButton = showDownloadEl ? showDownloadEl.checked : false;
     if (ignoreEl) {
@@ -379,7 +383,7 @@ window.addEventListener('message', (event) => {
         case 'load':
             loadConfig(message.config);
             const modeEl = document.getElementById('mode');
-            if (modeEl) { modeEl.disabled = !!message.hasSavedConfig; }
+            if (modeEl) { modeEl.disabled = false; }
             if (teleportLoginEl) { teleportLoginEl.hidden = !!message.isLoggedIn; }
             if (message.hasPassword) {
                 const passwordEl = document.getElementById('password'),

@@ -136,6 +136,21 @@ describe('webview config panel', () => {
         vm.runInNewContext(code, vm.createContext(sandbox), { filename: 'config.js' });
     });
 
+    it('loads and saves both automatic upload preferences in the panel', () => {
+        windowStub.postMessageToListeners({ data: { command: 'load', config: {
+            mode: 'teleport', uploadOnSave: false, uploadOnAutoSave: true
+        }, hasSavedConfig: true } });
+        expect(elements.uploadOnSave.checked).to.equal(false);
+        expect(elements.uploadOnAutoSave.checked).to.equal(true);
+        expect(elements.mode.disabled).to.equal(false);
+        elements.uploadOnSave.checked = true;
+        elements.uploadOnAutoSave.checked = false;
+        elements['config-form']._listeners.submit[0]({ preventDefault: () => {} });
+        const save = messages.find((message) => message.command === 'save');
+        expect(save.config.uploadOnSave).to.equal(true);
+        expect(save.config.uploadOnAutoSave).to.equal(false);
+    });
+
     it('shows loading bar and stops on result', async () => {
         const syncButton = elements['sync-now'];
         expect(syncButton).to.exist;
@@ -235,4 +250,12 @@ describe('webview config panel', () => {
         expect(elements['sync-now'].disabled).to.equal(false);
     });
 
+});
+
+describe('Teleport configuration fields', () => {
+    it('exposes the target host and user in Teleport mode', () => {
+        const html = fs.readFileSync(path.join(process.cwd(), 'src/webview/config.html'), 'utf8');
+        expect(html).to.match(/data-mode="sftp,teleport"><label for="sftpHost"/);
+        expect(html).to.match(/data-mode="sftp,teleport"><label for="sftpUser"/);
+    });
 });

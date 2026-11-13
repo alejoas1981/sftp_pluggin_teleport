@@ -32,6 +32,8 @@ export interface SftpConfig {
     verifyContents?: boolean;
     ftpPassive?: boolean;
     ftpSecure?: boolean;
+    uploadOnSave?: boolean;
+    uploadOnAutoSave?: boolean;
     showUploadButton?: boolean;
     showDownloadButton?: boolean;
 }
@@ -77,6 +79,8 @@ const scalarSettings: { key: keyof SftpConfig; loadDefault?: any; saveValue?: (v
     { key: 'useTeleport', loadDefault: false },
     { key: 'ftpPassive', loadDefault: true, saveValue: (v) => v ?? true },
     { key: 'ftpSecure', loadDefault: false, saveValue: (v) => v ?? false },
+    { key: 'uploadOnSave', loadDefault: true },
+    { key: 'uploadOnAutoSave', loadDefault: false },
     { key: 'showUploadButton', loadDefault: false, saveValue: (v) => v ?? false },
     { key: 'showDownloadButton', loadDefault: false, saveValue: (v) => v ?? false },
     { key: 'ignore', loadDefault: [], saveValue: (v) => v ?? [] },
@@ -103,7 +107,17 @@ export function resolveMode(config: { mode?: ConnectionMode; useTeleport?: boole
  */
 export function getConfiguration(): SftpConfig {
     const stored = configurationState?.get<SftpConfig>(privateConfigKey);
-    if (stored !== undefined) { return { ...stored, ignore: stored.ignore ? [...stored.ignore] : [] }; }
+    if (stored !== undefined) {
+        const settings = vscode.workspace.getConfiguration(section),
+            result = { ...stored, ignore: stored.ignore ? [...stored.ignore] : [],
+                uploadOnSave: stored.uploadOnSave ?? settings.get<boolean>('uploadOnSave', true),
+                uploadOnAutoSave: stored.uploadOnAutoSave ?? settings.get<boolean>('uploadOnAutoSave', false) };
+        if (resolveMode(result) === 'teleport' && stored.uploadOnSave === undefined && stored.uploadOnAutoSave === undefined) {
+            result.sftpHost = result.sftpHost || settings.get<string>('sftpHost');
+            result.sftpUser = result.sftpUser || settings.get<string>('sftpUser');
+        }
+        return result;
+    }
     const cfg = vscode.workspace.getConfiguration(section),
         mode = resolveMode({
             mode: cfg.get<ConnectionMode>('mode'),
@@ -126,10 +140,10 @@ export async function saveConfiguration(
     context: vscode.ExtensionContext,
     config: SftpConfig
 ): Promise<void> {
-    const mode = resolveMode(config), saved: SftpConfig = { mode };
+    const mode = resolveMode(config), saved: SftpConfig = { mode }, previous = getConfiguration();
     for (const { key, saveValue } of scalarSettings) {
         if (key === 'useTeleport') { continue; }
-        const raw = config[key];
+        const raw = (key === 'uploadOnSave' || key === 'uploadOnAutoSave') ? config[key] ?? previous[key] : config[key];
         (saved as any)[key] = saveValue ? saveValue(raw) : raw;
     }
     saved.useTeleport = mode === 'teleport';

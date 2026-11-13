@@ -2,6 +2,8 @@
 
 **3.2.1.**
 
+The configuration panel now includes manual save and automatic upload preferences. Local Path is editable and the connection mode can be changed in the panel.
+
 The configuration panel now reuses a single tab. Local changes made while the editor was closed are discovered on project opening and window focus using successful history and a private baseline inventory. Automatic upload follows uploadOnAutoSave. An initial inventory without history does not upload the entire project.
 
 1. Local save and external edit uploads use a persistent versioned path queue. New disk changes retain newer versions without cancelling an unrelated active upload.

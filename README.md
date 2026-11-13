@@ -20,7 +20,7 @@ Version 3.2.1 supports FTP, explicit FTPS, SFTP over SSH and Teleport in VS Code
 6. For password authentication, select Save password before saving. Test Connection can use a password currently entered in the form, but later commands load the saved SecretStorage password. An empty password field does not erase an existing saved password.
 7. Click Save before running Dry Run or Sync Now. These actions use saved configuration. Test Connection uses the values currently in the form. In Teleport mode it checks tsh session status rather than proving access to the target node or remote path.
 8. Run Dry Run and review the proposed operations before Sync Now. For a first import, use an empty local directory.
-9. To change connection values, edit the panel and save again. If the mode selector is disabled, use Delete Config to unlock it in that panel, then choose the mode and save. Delete Config clears fields associated with the selected mode. It does not delete the saved password, old settings files, synchronization history or pending upload journals.
+9. To change connection values, edit the panel and save again. Select another mode in the panel when needed and save the updated configuration. Delete Config clears fields associated with the selected mode. It does not delete the saved password, old settings files, synchronization history or pending upload journals.
 
 Normal connection setup does not require settings.json. The panel saves one active configuration privately for the workspace. It does not write project settings or gitignore files.
 
@@ -28,7 +28,7 @@ Normal connection setup does not require settings.json. The panel saves one acti
 
 Before a private configuration has been saved, the extension reads the registered sftpPluggin settings from VS Code. Once private configuration exists, that complete saved configuration takes precedence for connection fields, Ignore rules, concurrency and editor button preferences. Changing those connection values in settings.json will not override the private configuration. Use the panel instead.
 
-The uploadOnSave and uploadOnAutoSave preferences are read directly from VS Code Settings even after private connection configuration is saved. Change them through the Settings editor by searching for their setting names. Manual upload after saving defaults to enabled. Upload after automatic saves or external workspace changes defaults to disabled.
+The configuration panel contains checkboxes for upload on manual save and automatic upload. When an older saved configuration has no preference yet, the panel reads the existing VS Code Settings values. After saving the panel, its values take precedence. Manual upload after saving defaults to enabled. Upload after automatic saves or external workspace changes defaults to disabled.
 
 The source file sample-config.json is an optional Teleport settings reference. The extension does not import that file automatically. Copy its entries into VS Code Settings only when deliberately using the settings fallback. Use an absolute localPath. The extension does not expand workspaceFolder or environment variable placeholders in configuration paths. Relative local roots are not resolved consistently across commands and should be avoided.
 
