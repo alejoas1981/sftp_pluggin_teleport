@@ -87,6 +87,7 @@ function executeCommand(command: string, ...args: any[]) {
 }
 
 const vscodeMock = {
+    extensions: { getExtension: (_id: string): unknown => undefined },
     _updates: updates,
     _reset: reset,
     _values: values,

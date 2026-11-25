@@ -26,7 +26,12 @@ export class PendingUploads {
     }
     /** Records the latest observed file version and persists its path. */
     record(config: SftpConfig, file: string): Promise<void> {
-        this.entries(config).set(file, ++this.sequence);
+        return this.recordMany(config, [file]);
+    }
+    /** Persists all paths from a revision change in one journal update. */
+    recordMany(config: SftpConfig, files: Iterable<string>): Promise<void> {
+        const queue = this.entries(config);
+        for (const file of files) { queue.set(file, ++this.sequence); }
         return this.persist(config);
     }
     /** Removes only versions successfully handled by the supplied batch. */

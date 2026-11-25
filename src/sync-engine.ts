@@ -212,9 +212,25 @@ export class SyncEngine {
         this.cache = new ScanCache(this.config.localPath!);
         await this.cache.load();
         const local = await this.collectLocal(filter, options.files, options),
-            candidates = [...local].filter(([file, entry]) => !entry.isDirectory && !entry.isSymbolicLink
-                && (options.files ? options.files.includes(file) : state.records.has(file))
-                && !sameLocal(entry, state.records.get(file)?.local));
+            selected = options.files && new Set(options.files),
+            candidates: Array<[string, Entry]> = [],
+            previouslyUploaded: Array<[string, Entry]> = [];
+        for (const [file, entry] of local) {
+            if (entry.isDirectory || entry.isSymbolicLink || !(selected ? selected.has(file) : state.records.has(file))) { continue; }
+            if (!sameLocal(entry, state.records.get(file)?.local)) { candidates.push([file, entry]); }
+            else if (selected) { previouslyUploaded.push([file, entry]); }
+        }
+        const remoteRoot = this.config.remotePath!;
+        if (client.statMany && previouslyUploaded.length) {
+            const stats = await client.statMany(previouslyUploaded.map(([file]) => path.posix.join(remoteRoot, file)));
+            for (const item of previouslyUploaded) {
+                if (!stats.get(path.posix.join(remoteRoot, item[0]))) { candidates.push(item); }
+            }
+        } else {
+            for (const item of previouslyUploaded) {
+                if (!await client.stat(path.posix.join(remoteRoot, item[0]))) { candidates.push(item); }
+            }
+        }
         let next = 0, completed = 0, failed = false;
         const transferTimer = new TransferTimer();
         options.onState?.({ phase: 'Uploading local changes', current: 0, total: candidates.length,

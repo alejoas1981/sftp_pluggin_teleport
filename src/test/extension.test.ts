@@ -1,4 +1,5 @@
 import { expect } from 'chai';
+import { execFileSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -89,6 +90,47 @@ describe('extension', () => {
             expect(creates).to.equal(1); expect(reveals).to.equal(2);
             disposeHandler(); open(); expect(creates).to.equal(2);
         } finally { (vscode.window as any).createWebviewPanel = original; }
+    });
+
+    it('queues new and modified checkout paths even when file watcher events are missing', async () => {
+        Object.assign((vscode as any)._values, { sftpHost: 'host', sftpUser: 'user', remotePath: '/remote',
+            uploadOnAutoSave: true, ignore: ['cache'] });
+        /** Runs Git only in the disposable test repository. */
+        const git = (...args: string[]) => execFileSync('git', args, { cwd: tempDir, encoding: 'utf8' }).trim(),
+            extensions = (vscode as any).extensions,
+            originalGetExtension = extensions.getExtension,
+            batches: string[][] = [];
+        git('init', '-b', 'master');
+        fs.writeFileSync(path.join(tempDir, 'entry.php'), 'master');
+        git('add', '.');
+        git('-c', 'user.name=Test', '-c', 'user.email=test@example.test', 'commit', '-m', 'Master');
+        git('checkout', '-b', 'release');
+        fs.mkdirSync(path.join(tempDir, 'nested'));
+        fs.mkdirSync(path.join(tempDir, 'cache'));
+        fs.writeFileSync(path.join(tempDir, 'entry.php'), 'release');
+        fs.writeFileSync(path.join(tempDir, 'nested', 'new file.phtml'), 'release');
+        fs.writeFileSync(path.join(tempDir, 'cache', 'ignored.txt'), 'ignored');
+        git('add', '.');
+        git('-c', 'user.name=Test', '-c', 'user.email=test@example.test', 'commit', '-m', 'Release');
+        git('checkout', 'master');
+        let changed!: () => void, finish!: () => void;
+        const sent = new Promise<void>((resolve) => { finish = resolve; }),
+            state = { HEAD: { commit: git('rev-parse', 'HEAD') },
+                onDidChange: (listener: () => void) => { changed = listener; return { dispose() {} }; } },
+            repository = { rootUri: vscode.Uri.file(tempDir), state };
+        extensions.getExtension = () => ({ activate: async () => ({
+            getAPI: () => ({ repositories: [repository], onDidOpenRepository: () => ({ dispose() {} }) })
+        }) });
+        syncMock.uploadChangedFiles = async (_config: any, options: any) => { batches.push(options.files); finish(); return 'done'; };
+        try {
+            await ext.activate(context);
+            git('checkout', 'release');
+            state.HEAD.commit = git('rev-parse', 'HEAD');
+            changed();
+            await sent;
+            expect(batches).to.have.length(1);
+            expect(batches[0].sort()).to.deep.equal(['entry.php', 'nested/new file.phtml']);
+        } finally { extensions.getExtension = originalGetExtension; }
     });
 
     it('queues offline edits on reopening and uploads them when automatic uploads are enabled', async () => {

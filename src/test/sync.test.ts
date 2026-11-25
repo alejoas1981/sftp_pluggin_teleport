@@ -457,6 +457,17 @@ describe('two-way sync', () => {
         });
     }
 
+    it('restores a queued file missing on the server despite successful local history', async () => {
+        writeLocal('nested/new.txt', 'release');
+        const engine = new SyncEngine(config());
+        await engine.uploadChanged(remote, { files: ['nested/new.txt'] });
+        remote.files.delete('/remote/nested/new.txt');
+        remote.uploads.length = 0;
+        await engine.uploadChanged(remote, { files: ['nested/new.txt'] });
+        expect(remote.uploads).to.deep.equal(['/remote/nested/new.txt']);
+        expect(remote.files.get('/remote/nested/new.txt')?.content).to.equal('release');
+    });
+
     it('retries failed local uploads without resending successful files', async () => {
         writeLocal('a.txt', 'a'); writeLocal('b.txt', 'b');
         const put = remote.put.bind(remote);

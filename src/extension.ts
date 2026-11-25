@@ -11,6 +11,7 @@ import { normalizeRsyncOptions } from './rsync-options';
 import { SaveUploadQueue } from './save-upload-queue';
 import { PendingUploads } from './pending-uploads';
 import { LocalChangeDiscovery } from './local-change-discovery';
+import { changedGitPaths } from './git-changes';
 import { isIgnored } from './utils';
 import { SYNC_EXCLUDES } from './sync-state';
 import { configureStorage } from './private-storage';
@@ -101,7 +102,54 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         outputChannel.appendLine(`[auto-login] ${error.message}`);
         updateSftpStatus('$(warning) SFTP: not logged in');
     });
+    void watchGitChanges(context, discoveryController.signal);
     await discoverLocalUploads();
+}
+
+interface GitRepository {
+    rootUri: vscode.Uri;
+    state: { HEAD?: { commit?: string }; onDidChange: vscode.Event<void> };
+}
+
+/** Queues the actual Git revision diff even when checkout file events are missed. */
+async function watchGitChanges(context: vscode.ExtensionContext, signal: AbortSignal): Promise<void> {
+    const extension = vscode.extensions?.getExtension('vscode.git');
+    if (!extension) { return; }
+    try {
+        const git = (await extension.activate()).getAPI(1), watched = new WeakSet<GitRepository>();
+        if (signal.aborted) { return; }
+        /** Subscribes once per repository and serializes its revision changes. */
+        const watch = (repository: GitRepository): void => {
+            if (watched.has(repository)) { return; }
+            watched.add(repository);
+            let previous = repository.state.HEAD?.commit, pending = Promise.resolve();
+            context.subscriptions.push(repository.state.onDidChange(() => {
+                const before = previous, after = repository.state.HEAD?.commit;
+                if (!after || before === after) { return; }
+                previous = after;
+                if (!before || signal.aborted) { return; }
+                pending = pending.then(async () => {
+                    const config = getConfiguration(),
+                        files = await changedGitPaths(repository.rootUri.fsPath, before, after, signal),
+                        eligible = files.filter((file) => isUploadPath(config, file));
+                    if (signal.aborted || !eligible.length) { return; }
+                    await pendingUploads.recordMany(config, eligible);
+                    if (signal.aborted) { return; }
+                    outputChannel.appendLine(`[git] Queued ${eligible.length} paths after revision change.`);
+                    if (getConfiguration().uploadOnAutoSave === true) { saveUploads?.request(); }
+                }).catch(async (error: Error) => {
+                    if (signal.aborted) { return; }
+                    outputChannel.appendLine(`[git] Could not enumerate revision changes: ${error.message}`);
+                    if (discovery) { await discovery; }
+                    await discoverLocalUploads();
+                });
+            }));
+        };
+        for (const repository of git.repositories) { watch(repository); }
+        context.subscriptions.push(git.onDidOpenRepository(watch));
+    } catch (error: any) {
+        if (!signal.aborted) { outputChannel.appendLine(`[git] Could not observe revisions: ${error.message}`); }
+    }
 }
 
 /** Discovers offline local edits once at a time and submits them to the durable queue.

@@ -79,6 +79,7 @@ function executeCommand(command, ...args) {
     return handler ? handler(...args) : undefined;
 }
 const vscodeMock = {
+    extensions: { getExtension: (_id) => undefined },
     _updates: updates,
     _reset: reset,
     _values: values,

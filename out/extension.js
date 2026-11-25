@@ -1496,8 +1496,8 @@ var require_Client = __commonJS({
       /**
        * Set the working directory.
        */
-      async cd(path11) {
-        const validPath = await this.protectWhitespace(path11);
+      async cd(path12) {
+        const validPath = await this.protectWhitespace(path12);
         return this.send("CWD " + validPath);
       }
       /**
@@ -1510,8 +1510,8 @@ var require_Client = __commonJS({
        * Get the last modified time of a file. This is not supported by every FTP server, in which case
        * calling this method will throw an exception.
        */
-      async lastMod(path11) {
-        const validPath = await this.protectWhitespace(path11);
+      async lastMod(path12) {
+        const validPath = await this.protectWhitespace(path12);
         const res = await this.send(`MDTM ${validPath}`);
         const date = res.message.slice(4);
         return (0, parseListMLSD_1.parseMLSxDate)(date);
@@ -1519,8 +1519,8 @@ var require_Client = __commonJS({
       /**
        * Get the size of a file.
        */
-      async size(path11) {
-        const validPath = await this.protectWhitespace(path11);
+      async size(path12) {
+        const validPath = await this.protectWhitespace(path12);
         const command = `SIZE ${validPath}`;
         const res = await this.send(command);
         const size = parseInt(res.message.slice(4), 10);
@@ -1547,8 +1547,8 @@ var require_Client = __commonJS({
        * You can ignore FTP error return codes which won't throw an exception if e.g.
        * the file doesn't exist.
        */
-      async remove(path11, ignoreErrorCodes = false) {
-        const validPath = await this.protectWhitespace(path11);
+      async remove(path12, ignoreErrorCodes = false) {
+        const validPath = await this.protectWhitespace(path12);
         if (ignoreErrorCodes) {
           return this.sendIgnoringError(`DELE ${validPath}`);
         }
@@ -1702,8 +1702,8 @@ var require_Client = __commonJS({
        *
        * @param [path]  Path to remote file or directory.
        */
-      async list(path11 = "") {
-        const validPath = await this.protectWhitespace(path11);
+      async list(path12 = "") {
+        const validPath = await this.protectWhitespace(path12);
         let lastError;
         for (const candidate of this.availableListCommands) {
           const command = validPath === "" ? candidate : `${candidate} ${validPath}`;
@@ -1873,21 +1873,21 @@ var require_Client = __commonJS({
       /**
        * Remove an empty directory, will fail if not empty.
        */
-      async removeEmptyDir(path11) {
-        const validPath = await this.protectWhitespace(path11);
+      async removeEmptyDir(path12) {
+        const validPath = await this.protectWhitespace(path12);
         return this.send(`RMD ${validPath}`);
       }
       /**
        * FTP servers can't handle filenames that have leading whitespace. This method transforms
        * a given path to fix that issue for most cases.
        */
-      async protectWhitespace(path11) {
-        if (!path11.startsWith(" ")) {
-          return path11;
+      async protectWhitespace(path12) {
+        if (!path12.startsWith(" ")) {
+          return path12;
         }
         const pwd = await this.pwd();
         const absolutePathPrefix = pwd.endsWith("/") ? pwd : pwd + "/";
-        return absolutePathPrefix + path11;
+        return absolutePathPrefix + path12;
       }
       async _exitAtCurrentDirectory(func) {
         const userDir = await this.pwd();
@@ -1964,11 +1964,11 @@ var require_Client = __commonJS({
       }
     };
     exports2.Client = Client;
-    async function ensureLocalDirectory(path11) {
+    async function ensureLocalDirectory(path12) {
       try {
-        await fsStat(path11);
+        await fsStat(path12);
       } catch (_a) {
-        await fsMkDir(path11, { recursive: true });
+        await fsMkDir(path12, { recursive: true });
       }
     }
     async function ignoreError(func) {
@@ -10340,7 +10340,7 @@ var require_agent = __commonJS({
     var { Duplex } = require("stream");
     var { resolve: resolve3 } = require("path");
     var { readFile } = require("fs");
-    var { execFile, spawn: spawn2 } = require("child_process");
+    var { execFile: execFile2, spawn: spawn2 } = require("child_process");
     var { isParsedKey, parseKey } = require_keyParser();
     var {
       makeBufferParser,
@@ -10561,7 +10561,7 @@ var require_agent = __commonJS({
             if (err) {
               if (triedCygpath)
                 return cb(new Error("Invalid cygwin unix socket path"));
-              execFile("cygpath", ["-w", socketPath], (err2, stdout, stderr) => {
+              execFile2("cygpath", ["-w", socketPath], (err2, stdout, stderr) => {
                 if (err2 || stdout.length === 0)
                   return cb(new Error("Invalid cygwin unix socket path"));
                 triedCygpath = true;
@@ -10640,11 +10640,11 @@ var require_agent = __commonJS({
       };
     })();
     var WINDOWS_PIPE_REGEX = /^[/\\][/\\]\.[/\\]pipe[/\\].+/;
-    function createAgent(path11) {
-      if (process.platform === "win32" && !WINDOWS_PIPE_REGEX.test(path11)) {
-        return path11 === "pageant" ? new PageantAgent() : new CygwinAgent(path11);
+    function createAgent(path12) {
+      if (process.platform === "win32" && !WINDOWS_PIPE_REGEX.test(path12)) {
+        return path12 === "pageant" ? new PageantAgent() : new CygwinAgent(path12);
       }
-      return new OpenSSHAgent(path11);
+      return new OpenSSHAgent(path12);
     }
     var AgentProtocol = (() => {
       const SSH_AGENTC_REQUEST_IDENTITIES = 11;
@@ -15888,17 +15888,17 @@ var require_SFTP = __commonJS({
       // ===========================================================================
       // Client-specific ===========================================================
       // ===========================================================================
-      createReadStream(path11, options) {
+      createReadStream(path12, options) {
         if (this.server)
           throw new Error("Client-only method called in server mode");
-        return new ReadStream(this, path11, options);
+        return new ReadStream(this, path12, options);
       }
-      createWriteStream(path11, options) {
+      createWriteStream(path12, options) {
         if (this.server)
           throw new Error("Client-only method called in server mode");
-        return new WriteStream(this, path11, options);
+        return new WriteStream(this, path12, options);
       }
-      open(path11, flags_, attrs, cb) {
+      open(path12, flags_, attrs, cb) {
         if (this.server)
           throw new Error("Client-only method called in server mode");
         if (typeof attrs === "function") {
@@ -15917,7 +15917,7 @@ var require_SFTP = __commonJS({
           attrsFlags = attrs.flags;
           attrsLen = attrs.nb;
         }
-        const pathLen = Buffer.byteLength(path11);
+        const pathLen = Buffer.byteLength(path12);
         let p2 = 9;
         const buf = Buffer.allocUnsafe(4 + 1 + 4 + 4 + pathLen + 4 + 4 + attrsLen);
         writeUInt32BE(buf, buf.length - 4, 0);
@@ -15925,7 +15925,7 @@ var require_SFTP = __commonJS({
         const reqid = this._writeReqid = this._writeReqid + 1 & MAX_REQID;
         writeUInt32BE(buf, reqid, 5);
         writeUInt32BE(buf, pathLen, p2);
-        buf.utf8Write(path11, p2 += 4, pathLen);
+        buf.utf8Write(path12, p2 += 4, pathLen);
         writeUInt32BE(buf, flags, p2 += pathLen);
         writeUInt32BE(buf, attrsFlags, p2 += 4);
         if (attrsLen) {
@@ -16056,7 +16056,7 @@ var require_SFTP = __commonJS({
           throw new Error("Client-only method called in server mode");
         fastXfer(fs10, this, localPath, remotePath, opts, cb);
       }
-      readFile(path11, options, callback_) {
+      readFile(path12, options, callback_) {
         if (this.server)
           throw new Error("Client-only method called in server mode");
         let callback;
@@ -16129,13 +16129,13 @@ var require_SFTP = __commonJS({
             return callback && callback(er2, buffer);
           });
         };
-        this.open(path11, flag, 438, (er2, handle_) => {
+        this.open(path12, flag, 438, (er2, handle_) => {
           if (er2)
             return callback && callback(er2);
           handle = handle_;
           const tryStat = (er3, st2) => {
             if (er3) {
-              this.stat(path11, (er_, st_) => {
+              this.stat(path12, (er_, st_) => {
                 if (er_) {
                   return this.close(handle, () => {
                     callback && callback(er3);
@@ -16156,7 +16156,7 @@ var require_SFTP = __commonJS({
           this.fstat(handle, tryStat);
         });
       }
-      writeFile(path11, data, options, callback_) {
+      writeFile(path12, data, options, callback_) {
         if (this.server)
           throw new Error("Client-only method called in server mode");
         let callback;
@@ -16175,7 +16175,7 @@ var require_SFTP = __commonJS({
         if (options.encoding && !Buffer.isEncoding(options.encoding))
           throw new Error(`Unknown encoding: ${options.encoding}`);
         const flag = options.flag || "w";
-        this.open(path11, flag, options.mode, (openErr, handle) => {
+        this.open(path12, flag, options.mode, (openErr, handle) => {
           if (openErr) {
             callback && callback(openErr);
           } else {
@@ -16184,7 +16184,7 @@ var require_SFTP = __commonJS({
             if (position === null) {
               const tryStat = (er2, st2) => {
                 if (er2) {
-                  this.stat(path11, (er_, st_) => {
+                  this.stat(path12, (er_, st_) => {
                     if (er_) {
                       return this.close(handle, () => {
                         callback && callback(er2);
@@ -16203,7 +16203,7 @@ var require_SFTP = __commonJS({
           }
         });
       }
-      appendFile(path11, data, options, callback_) {
+      appendFile(path12, data, options, callback_) {
         if (this.server)
           throw new Error("Client-only method called in server mode");
         let callback;
@@ -16221,12 +16221,12 @@ var require_SFTP = __commonJS({
           throw new TypeError("Bad arguments");
         if (!options.flag)
           options = Object.assign({ flag: "a" }, options);
-        this.writeFile(path11, data, options, callback);
+        this.writeFile(path12, data, options, callback);
       }
-      exists(path11, cb) {
+      exists(path12, cb) {
         if (this.server)
           throw new Error("Client-only method called in server mode");
-        this.stat(path11, (err) => {
+        this.stat(path12, (err) => {
           cb && cb(err ? false : true);
         });
       }
@@ -16269,7 +16269,7 @@ var require_SFTP = __commonJS({
           `SFTP: Outbound: ${isBuffered ? "Buffered" : "Sending"} RENAME`
         );
       }
-      mkdir(path11, attrs, cb) {
+      mkdir(path12, attrs, cb) {
         if (this.server)
           throw new Error("Client-only method called in server mode");
         let flags = 0;
@@ -16283,7 +16283,7 @@ var require_SFTP = __commonJS({
           flags = attrs.flags;
           attrsLen = attrs.nb;
         }
-        const pathLen = Buffer.byteLength(path11);
+        const pathLen = Buffer.byteLength(path12);
         let p2 = 9;
         const buf = Buffer.allocUnsafe(4 + 1 + 4 + 4 + pathLen + 4 + attrsLen);
         writeUInt32BE(buf, buf.length - 4, 0);
@@ -16291,7 +16291,7 @@ var require_SFTP = __commonJS({
         const reqid = this._writeReqid = this._writeReqid + 1 & MAX_REQID;
         writeUInt32BE(buf, reqid, 5);
         writeUInt32BE(buf, pathLen, p2);
-        buf.utf8Write(path11, p2 += 4, pathLen);
+        buf.utf8Write(path12, p2 += 4, pathLen);
         writeUInt32BE(buf, flags, p2 += pathLen);
         if (attrsLen) {
           p2 += 4;
@@ -16307,10 +16307,10 @@ var require_SFTP = __commonJS({
           `SFTP: Outbound: ${isBuffered ? "Buffered" : "Sending"} MKDIR`
         );
       }
-      rmdir(path11, cb) {
+      rmdir(path12, cb) {
         if (this.server)
           throw new Error("Client-only method called in server mode");
-        const pathLen = Buffer.byteLength(path11);
+        const pathLen = Buffer.byteLength(path12);
         let p2 = 9;
         const buf = Buffer.allocUnsafe(4 + 1 + 4 + 4 + pathLen);
         writeUInt32BE(buf, buf.length - 4, 0);
@@ -16318,7 +16318,7 @@ var require_SFTP = __commonJS({
         const reqid = this._writeReqid = this._writeReqid + 1 & MAX_REQID;
         writeUInt32BE(buf, reqid, 5);
         writeUInt32BE(buf, pathLen, p2);
-        buf.utf8Write(path11, p2 += 4, pathLen);
+        buf.utf8Write(path12, p2 += 4, pathLen);
         this._requests[reqid] = { cb };
         const isBuffered = sendOrBuffer(this, buf);
         this._debug && this._debug(
@@ -16408,10 +16408,10 @@ var require_SFTP = __commonJS({
           `SFTP: Outbound: ${isBuffered ? "Buffered" : "Sending"} FSTAT`
         );
       }
-      stat(path11, cb) {
+      stat(path12, cb) {
         if (this.server)
           throw new Error("Client-only method called in server mode");
-        const pathLen = Buffer.byteLength(path11);
+        const pathLen = Buffer.byteLength(path12);
         let p2 = 9;
         const buf = Buffer.allocUnsafe(4 + 1 + 4 + 4 + pathLen);
         writeUInt32BE(buf, buf.length - 4, 0);
@@ -16419,17 +16419,17 @@ var require_SFTP = __commonJS({
         const reqid = this._writeReqid = this._writeReqid + 1 & MAX_REQID;
         writeUInt32BE(buf, reqid, 5);
         writeUInt32BE(buf, pathLen, p2);
-        buf.utf8Write(path11, p2 += 4, pathLen);
+        buf.utf8Write(path12, p2 += 4, pathLen);
         this._requests[reqid] = { cb };
         const isBuffered = sendOrBuffer(this, buf);
         this._debug && this._debug(
           `SFTP: Outbound: ${isBuffered ? "Buffered" : "Sending"} STAT`
         );
       }
-      lstat(path11, cb) {
+      lstat(path12, cb) {
         if (this.server)
           throw new Error("Client-only method called in server mode");
-        const pathLen = Buffer.byteLength(path11);
+        const pathLen = Buffer.byteLength(path12);
         let p2 = 9;
         const buf = Buffer.allocUnsafe(4 + 1 + 4 + 4 + pathLen);
         writeUInt32BE(buf, buf.length - 4, 0);
@@ -16437,17 +16437,17 @@ var require_SFTP = __commonJS({
         const reqid = this._writeReqid = this._writeReqid + 1 & MAX_REQID;
         writeUInt32BE(buf, reqid, 5);
         writeUInt32BE(buf, pathLen, p2);
-        buf.utf8Write(path11, p2 += 4, pathLen);
+        buf.utf8Write(path12, p2 += 4, pathLen);
         this._requests[reqid] = { cb };
         const isBuffered = sendOrBuffer(this, buf);
         this._debug && this._debug(
           `SFTP: Outbound: ${isBuffered ? "Buffered" : "Sending"} LSTAT`
         );
       }
-      opendir(path11, cb) {
+      opendir(path12, cb) {
         if (this.server)
           throw new Error("Client-only method called in server mode");
-        const pathLen = Buffer.byteLength(path11);
+        const pathLen = Buffer.byteLength(path12);
         let p2 = 9;
         const buf = Buffer.allocUnsafe(4 + 1 + 4 + 4 + pathLen);
         writeUInt32BE(buf, buf.length - 4, 0);
@@ -16455,14 +16455,14 @@ var require_SFTP = __commonJS({
         const reqid = this._writeReqid = this._writeReqid + 1 & MAX_REQID;
         writeUInt32BE(buf, reqid, 5);
         writeUInt32BE(buf, pathLen, p2);
-        buf.utf8Write(path11, p2 += 4, pathLen);
+        buf.utf8Write(path12, p2 += 4, pathLen);
         this._requests[reqid] = { cb };
         const isBuffered = sendOrBuffer(this, buf);
         this._debug && this._debug(
           `SFTP: Outbound: ${isBuffered ? "Buffered" : "Sending"} OPENDIR`
         );
       }
-      setstat(path11, attrs, cb) {
+      setstat(path12, attrs, cb) {
         if (this.server)
           throw new Error("Client-only method called in server mode");
         let flags = 0;
@@ -16474,7 +16474,7 @@ var require_SFTP = __commonJS({
         } else if (typeof attrs === "function") {
           cb = attrs;
         }
-        const pathLen = Buffer.byteLength(path11);
+        const pathLen = Buffer.byteLength(path12);
         let p2 = 9;
         const buf = Buffer.allocUnsafe(4 + 1 + 4 + 4 + pathLen + 4 + attrsLen);
         writeUInt32BE(buf, buf.length - 4, 0);
@@ -16482,7 +16482,7 @@ var require_SFTP = __commonJS({
         const reqid = this._writeReqid = this._writeReqid + 1 & MAX_REQID;
         writeUInt32BE(buf, reqid, 5);
         writeUInt32BE(buf, pathLen, p2);
-        buf.utf8Write(path11, p2 += 4, pathLen);
+        buf.utf8Write(path12, p2 += 4, pathLen);
         writeUInt32BE(buf, flags, p2 += pathLen);
         if (attrsLen) {
           p2 += 4;
@@ -16542,8 +16542,8 @@ var require_SFTP = __commonJS({
           mtime: toUnixTimestamp(mtime)
         }, cb);
       }
-      utimes(path11, atime, mtime, cb) {
-        return this.setstat(path11, {
+      utimes(path12, atime, mtime, cb) {
+        return this.setstat(path12, {
           atime: toUnixTimestamp(atime),
           mtime: toUnixTimestamp(mtime)
         }, cb);
@@ -16554,8 +16554,8 @@ var require_SFTP = __commonJS({
           gid
         }, cb);
       }
-      chown(path11, uid, gid, cb) {
-        return this.setstat(path11, {
+      chown(path12, uid, gid, cb) {
+        return this.setstat(path12, {
           uid,
           gid
         }, cb);
@@ -16565,15 +16565,15 @@ var require_SFTP = __commonJS({
           mode
         }, cb);
       }
-      chmod(path11, mode, cb) {
-        return this.setstat(path11, {
+      chmod(path12, mode, cb) {
+        return this.setstat(path12, {
           mode
         }, cb);
       }
-      readlink(path11, cb) {
+      readlink(path12, cb) {
         if (this.server)
           throw new Error("Client-only method called in server mode");
-        const pathLen = Buffer.byteLength(path11);
+        const pathLen = Buffer.byteLength(path12);
         let p2 = 9;
         const buf = Buffer.allocUnsafe(4 + 1 + 4 + 4 + pathLen);
         writeUInt32BE(buf, buf.length - 4, 0);
@@ -16581,7 +16581,7 @@ var require_SFTP = __commonJS({
         const reqid = this._writeReqid = this._writeReqid + 1 & MAX_REQID;
         writeUInt32BE(buf, reqid, 5);
         writeUInt32BE(buf, pathLen, p2);
-        buf.utf8Write(path11, p2 += 4, pathLen);
+        buf.utf8Write(path12, p2 += 4, pathLen);
         this._requests[reqid] = {
           cb: (err, names) => {
             if (typeof cb !== "function")
@@ -16626,10 +16626,10 @@ var require_SFTP = __commonJS({
           `SFTP: Outbound: ${isBuffered ? "Buffered" : "Sending"} SYMLINK`
         );
       }
-      realpath(path11, cb) {
+      realpath(path12, cb) {
         if (this.server)
           throw new Error("Client-only method called in server mode");
-        const pathLen = Buffer.byteLength(path11);
+        const pathLen = Buffer.byteLength(path12);
         let p2 = 9;
         const buf = Buffer.allocUnsafe(4 + 1 + 4 + 4 + pathLen);
         writeUInt32BE(buf, buf.length - 4, 0);
@@ -16637,7 +16637,7 @@ var require_SFTP = __commonJS({
         const reqid = this._writeReqid = this._writeReqid + 1 & MAX_REQID;
         writeUInt32BE(buf, reqid, 5);
         writeUInt32BE(buf, pathLen, p2);
-        buf.utf8Write(path11, p2 += 4, pathLen);
+        buf.utf8Write(path12, p2 += 4, pathLen);
         this._requests[reqid] = {
           cb: (err, names) => {
             if (typeof cb !== "function")
@@ -16682,13 +16682,13 @@ var require_SFTP = __commonJS({
           this._debug(`SFTP: Outbound: ${which} posix-rename@openssh.com`);
         }
       }
-      ext_openssh_statvfs(path11, cb) {
+      ext_openssh_statvfs(path12, cb) {
         if (this.server)
           throw new Error("Client-only method called in server mode");
         const ext = this._extensions["statvfs@openssh.com"];
         if (!ext || ext !== "2")
           throw new Error("Server does not support this extended request");
-        const pathLen = Buffer.byteLength(path11);
+        const pathLen = Buffer.byteLength(path12);
         let p2 = 9;
         const buf = Buffer.allocUnsafe(4 + 1 + 4 + 4 + 19 + 4 + pathLen);
         writeUInt32BE(buf, buf.length - 4, 0);
@@ -16698,7 +16698,7 @@ var require_SFTP = __commonJS({
         writeUInt32BE(buf, 19, p2);
         buf.utf8Write("statvfs@openssh.com", p2 += 4, 19);
         writeUInt32BE(buf, pathLen, p2 += 19);
-        buf.utf8Write(path11, p2 += 4, pathLen);
+        buf.utf8Write(path12, p2 += 4, pathLen);
         this._requests[reqid] = { extended: "statvfs@openssh.com", cb };
         const isBuffered = sendOrBuffer(this, buf);
         if (this._debug) {
@@ -16784,7 +16784,7 @@ var require_SFTP = __commonJS({
           `SFTP: Outbound: ${isBuffered ? "Buffered" : "Sending"} fsync@openssh.com`
         );
       }
-      ext_openssh_lsetstat(path11, attrs, cb) {
+      ext_openssh_lsetstat(path12, attrs, cb) {
         if (this.server)
           throw new Error("Client-only method called in server mode");
         const ext = this._extensions["lsetstat@openssh.com"];
@@ -16799,7 +16799,7 @@ var require_SFTP = __commonJS({
         } else if (typeof attrs === "function") {
           cb = attrs;
         }
-        const pathLen = Buffer.byteLength(path11);
+        const pathLen = Buffer.byteLength(path12);
         let p2 = 9;
         const buf = Buffer.allocUnsafe(4 + 1 + 4 + 4 + 20 + 4 + pathLen + 4 + attrsLen);
         writeUInt32BE(buf, buf.length - 4, 0);
@@ -16809,7 +16809,7 @@ var require_SFTP = __commonJS({
         writeUInt32BE(buf, 20, p2);
         buf.utf8Write("lsetstat@openssh.com", p2 += 4, 20);
         writeUInt32BE(buf, pathLen, p2 += 20);
-        buf.utf8Write(path11, p2 += 4, pathLen);
+        buf.utf8Write(path12, p2 += 4, pathLen);
         writeUInt32BE(buf, flags, p2 += pathLen);
         if (attrsLen) {
           p2 += 4;
@@ -16826,13 +16826,13 @@ var require_SFTP = __commonJS({
           this._debug(`SFTP: Outbound: ${status} lsetstat@openssh.com`);
         }
       }
-      ext_openssh_expandPath(path11, cb) {
+      ext_openssh_expandPath(path12, cb) {
         if (this.server)
           throw new Error("Client-only method called in server mode");
         const ext = this._extensions["expand-path@openssh.com"];
         if (ext !== "1")
           throw new Error("Server does not support this extended request");
-        const pathLen = Buffer.byteLength(path11);
+        const pathLen = Buffer.byteLength(path12);
         let p2 = 9;
         const buf = Buffer.allocUnsafe(4 + 1 + 4 + 4 + 23 + 4 + pathLen);
         writeUInt32BE(buf, buf.length - 4, 0);
@@ -16842,7 +16842,7 @@ var require_SFTP = __commonJS({
         writeUInt32BE(buf, 23, p2);
         buf.utf8Write("expand-path@openssh.com", p2 += 4, 23);
         writeUInt32BE(buf, pathLen, p2 += 20);
-        buf.utf8Write(path11, p2 += 4, pathLen);
+        buf.utf8Write(path12, p2 += 4, pathLen);
         this._requests[reqid] = {
           cb: (err, names) => {
             if (typeof cb !== "function")
@@ -17750,7 +17750,7 @@ var require_SFTP = __commonJS({
       [RESPONSE.VERSION]: (sftp, payload) => {
         if (sftp._version !== -1)
           return doFatalSFTPError(sftp, "Duplicate VERSION packet");
-        const extensions = {};
+        const extensions2 = {};
         bufferParser.init(payload, 1);
         let version = bufferParser.readUInt32BE();
         while (bufferParser.avail()) {
@@ -17760,13 +17760,13 @@ var require_SFTP = __commonJS({
             version = void 0;
             break;
           }
-          extensions[extName] = extData;
+          extensions2[extName] = extData;
         }
         bufferParser.clear();
         if (version === void 0)
           return doFatalSFTPError(sftp, "Malformed VERSION packet");
         if (sftp._debug) {
-          const names = Object.keys(extensions);
+          const names = Object.keys(extensions2);
           if (names.length) {
             sftp._debug(
               `SFTP: Inbound: Received VERSION (v${version}, exts:${names})`
@@ -17776,8 +17776,8 @@ var require_SFTP = __commonJS({
           }
         }
         sftp._version = version;
-        sftp._extensions = extensions;
-        if (extensions["limits@openssh.com"] === "1") {
+        sftp._extensions = extensions2;
+        if (extensions2["limits@openssh.com"] === "1") {
           return requestLimits(sftp, (err, limits) => {
             if (!err) {
               if (limits.maxPktLen > 0)
@@ -18033,7 +18033,7 @@ var require_SFTP = __commonJS({
       [REQUEST.INIT]: (sftp, payload) => {
         if (sftp._version !== -1)
           return doFatalSFTPError(sftp, "Duplicate INIT packet");
-        const extensions = {};
+        const extensions2 = {};
         bufferParser.init(payload, 1);
         let version = bufferParser.readUInt32BE();
         while (bufferParser.avail()) {
@@ -18043,13 +18043,13 @@ var require_SFTP = __commonJS({
             version = void 0;
             break;
           }
-          extensions[extName] = extData;
+          extensions2[extName] = extData;
         }
         bufferParser.clear();
         if (version === void 0)
           return doFatalSFTPError(sftp, "Malformed INIT packet");
         if (sftp._debug) {
-          const names = Object.keys(extensions);
+          const names = Object.keys(extensions2);
           if (names.length) {
             sftp._debug(
               `SFTP: Inbound: Received INIT (v${version}, exts:${names})`
@@ -18060,7 +18060,7 @@ var require_SFTP = __commonJS({
         }
         sendOrBuffer(sftp, SERVER_VERSION_BUFFER);
         sftp._version = version;
-        sftp._extensions = extensions;
+        sftp._extensions = extensions2;
         sftp.emit("ready");
       },
       [REQUEST.OPEN]: (sftp, payload) => {
@@ -18120,12 +18120,12 @@ var require_SFTP = __commonJS({
       [REQUEST.LSTAT]: (sftp, payload) => {
         bufferParser.init(payload, 1);
         const reqID = bufferParser.readUInt32BE();
-        const path11 = bufferParser.readString(true);
+        const path12 = bufferParser.readString(true);
         bufferParser.clear();
-        if (path11 === void 0)
+        if (path12 === void 0)
           return doFatalSFTPError(sftp, "Malformed LSTAT packet");
         sftp._debug && sftp._debug(`SFTP: Inbound: Received LSTAT (id:${reqID})`);
-        if (!sftp.emit("LSTAT", reqID, path11)) {
+        if (!sftp.emit("LSTAT", reqID, path12)) {
           sftp.status(reqID, STATUS_CODE.OP_UNSUPPORTED);
         }
       },
@@ -18144,13 +18144,13 @@ var require_SFTP = __commonJS({
       [REQUEST.SETSTAT]: (sftp, payload) => {
         bufferParser.init(payload, 1);
         const reqID = bufferParser.readUInt32BE();
-        const path11 = bufferParser.readString(true);
+        const path12 = bufferParser.readString(true);
         const attrs = readAttrs(sftp._biOpt);
         bufferParser.clear();
         if (attrs === void 0)
           return doFatalSFTPError(sftp, "Malformed SETSTAT packet");
         sftp._debug && sftp._debug(`SFTP: Inbound: Received SETSTAT (id:${reqID})`);
-        if (!sftp.emit("SETSTAT", reqID, path11, attrs)) {
+        if (!sftp.emit("SETSTAT", reqID, path12, attrs)) {
           sftp.status(reqID, STATUS_CODE.OP_UNSUPPORTED);
         }
       },
@@ -18172,12 +18172,12 @@ var require_SFTP = __commonJS({
       [REQUEST.OPENDIR]: (sftp, payload) => {
         bufferParser.init(payload, 1);
         const reqID = bufferParser.readUInt32BE();
-        const path11 = bufferParser.readString(true);
+        const path12 = bufferParser.readString(true);
         bufferParser.clear();
-        if (path11 === void 0)
+        if (path12 === void 0)
           return doFatalSFTPError(sftp, "Malformed OPENDIR packet");
         sftp._debug && sftp._debug(`SFTP: Inbound: Received OPENDIR (id:${reqID})`);
-        if (!sftp.emit("OPENDIR", reqID, path11)) {
+        if (!sftp.emit("OPENDIR", reqID, path12)) {
           sftp.status(reqID, STATUS_CODE.OP_UNSUPPORTED);
         }
       },
@@ -18196,63 +18196,63 @@ var require_SFTP = __commonJS({
       [REQUEST.REMOVE]: (sftp, payload) => {
         bufferParser.init(payload, 1);
         const reqID = bufferParser.readUInt32BE();
-        const path11 = bufferParser.readString(true);
+        const path12 = bufferParser.readString(true);
         bufferParser.clear();
-        if (path11 === void 0)
+        if (path12 === void 0)
           return doFatalSFTPError(sftp, "Malformed REMOVE packet");
         sftp._debug && sftp._debug(`SFTP: Inbound: Received REMOVE (id:${reqID})`);
-        if (!sftp.emit("REMOVE", reqID, path11)) {
+        if (!sftp.emit("REMOVE", reqID, path12)) {
           sftp.status(reqID, STATUS_CODE.OP_UNSUPPORTED);
         }
       },
       [REQUEST.MKDIR]: (sftp, payload) => {
         bufferParser.init(payload, 1);
         const reqID = bufferParser.readUInt32BE();
-        const path11 = bufferParser.readString(true);
+        const path12 = bufferParser.readString(true);
         const attrs = readAttrs(sftp._biOpt);
         bufferParser.clear();
         if (attrs === void 0)
           return doFatalSFTPError(sftp, "Malformed MKDIR packet");
         sftp._debug && sftp._debug(`SFTP: Inbound: Received MKDIR (id:${reqID})`);
-        if (!sftp.emit("MKDIR", reqID, path11, attrs)) {
+        if (!sftp.emit("MKDIR", reqID, path12, attrs)) {
           sftp.status(reqID, STATUS_CODE.OP_UNSUPPORTED);
         }
       },
       [REQUEST.RMDIR]: (sftp, payload) => {
         bufferParser.init(payload, 1);
         const reqID = bufferParser.readUInt32BE();
-        const path11 = bufferParser.readString(true);
+        const path12 = bufferParser.readString(true);
         bufferParser.clear();
-        if (path11 === void 0)
+        if (path12 === void 0)
           return doFatalSFTPError(sftp, "Malformed RMDIR packet");
         sftp._debug && sftp._debug(`SFTP: Inbound: Received RMDIR (id:${reqID})`);
-        if (!sftp.emit("RMDIR", reqID, path11)) {
+        if (!sftp.emit("RMDIR", reqID, path12)) {
           sftp.status(reqID, STATUS_CODE.OP_UNSUPPORTED);
         }
       },
       [REQUEST.REALPATH]: (sftp, payload) => {
         bufferParser.init(payload, 1);
         const reqID = bufferParser.readUInt32BE();
-        const path11 = bufferParser.readString(true);
+        const path12 = bufferParser.readString(true);
         bufferParser.clear();
-        if (path11 === void 0)
+        if (path12 === void 0)
           return doFatalSFTPError(sftp, "Malformed REALPATH packet");
         sftp._debug && sftp._debug(
           `SFTP: Inbound: Received REALPATH (id:${reqID})`
         );
-        if (!sftp.emit("REALPATH", reqID, path11)) {
+        if (!sftp.emit("REALPATH", reqID, path12)) {
           sftp.status(reqID, STATUS_CODE.OP_UNSUPPORTED);
         }
       },
       [REQUEST.STAT]: (sftp, payload) => {
         bufferParser.init(payload, 1);
         const reqID = bufferParser.readUInt32BE();
-        const path11 = bufferParser.readString(true);
+        const path12 = bufferParser.readString(true);
         bufferParser.clear();
-        if (path11 === void 0)
+        if (path12 === void 0)
           return doFatalSFTPError(sftp, "Malformed STAT packet");
         sftp._debug && sftp._debug(`SFTP: Inbound: Received STAT (id:${reqID})`);
-        if (!sftp.emit("STAT", reqID, path11)) {
+        if (!sftp.emit("STAT", reqID, path12)) {
           sftp.status(reqID, STATUS_CODE.OP_UNSUPPORTED);
         }
       },
@@ -18272,14 +18272,14 @@ var require_SFTP = __commonJS({
       [REQUEST.READLINK]: (sftp, payload) => {
         bufferParser.init(payload, 1);
         const reqID = bufferParser.readUInt32BE();
-        const path11 = bufferParser.readString(true);
+        const path12 = bufferParser.readString(true);
         bufferParser.clear();
-        if (path11 === void 0)
+        if (path12 === void 0)
           return doFatalSFTPError(sftp, "Malformed READLINK packet");
         sftp._debug && sftp._debug(
           `SFTP: Inbound: Received READLINK (id:${reqID})`
         );
-        if (!sftp.emit("READLINK", reqID, path11)) {
+        if (!sftp.emit("READLINK", reqID, path12)) {
           sftp.status(reqID, STATUS_CODE.OP_UNSUPPORTED);
         }
       },
@@ -18350,7 +18350,7 @@ var require_SFTP = __commonJS({
     function roundUpToMultipleOf8(n) {
       return n + 7 & ~7;
     }
-    function ReadStream(sftp, path11, options) {
+    function ReadStream(sftp, path12, options) {
       if (options === void 0)
         options = {};
       else if (typeof options === "string")
@@ -18364,7 +18364,7 @@ var require_SFTP = __commonJS({
       options.emitClose = false;
       options.autoDestroy = false;
       ReadableStream.call(this, options);
-      this.path = path11;
+      this.path = path12;
       this.flags = options.flags === void 0 ? "r" : options.flags;
       this.mode = options.mode === void 0 ? 438 : options.mode;
       this.start = options.start;
@@ -18495,7 +18495,7 @@ var require_SFTP = __commonJS({
       },
       configurable: true
     });
-    function WriteStream(sftp, path11, options) {
+    function WriteStream(sftp, path12, options) {
       if (options === void 0)
         options = {};
       else if (typeof options === "string")
@@ -18507,7 +18507,7 @@ var require_SFTP = __commonJS({
       options.emitClose = false;
       options.autoDestroy = false;
       WritableStream.call(this, options);
-      this.path = path11;
+      this.path = path12;
       this.flags = options.flags === void 0 ? "w" : options.flags;
       this.mode = options.mode === void 0 ? 438 : options.mode;
       this.start = options.start;
@@ -22941,17 +22941,17 @@ var require_ignore = __commonJS({
     var throwError = (message, Ctor) => {
       throw new Ctor(message);
     };
-    var checkPath = (path11, originalPath, doThrow) => {
-      if (!isString(path11)) {
+    var checkPath = (path12, originalPath, doThrow) => {
+      if (!isString(path12)) {
         return doThrow(
           `path must be a string, but got \`${originalPath}\``,
           TypeError
         );
       }
-      if (!path11) {
+      if (!path12) {
         return doThrow(`path must not be empty`, TypeError);
       }
-      if (checkPath.isNotRelative(path11)) {
+      if (checkPath.isNotRelative(path12)) {
         const r = "`path.relative()`d";
         return doThrow(
           `path should be a ${r} string, but got "${originalPath}"`,
@@ -22960,7 +22960,7 @@ var require_ignore = __commonJS({
       }
       return true;
     };
-    var isNotRelative = (path11) => REGEX_TEST_INVALID_PATH.test(path11);
+    var isNotRelative = (path12) => REGEX_TEST_INVALID_PATH.test(path12);
     checkPath.isNotRelative = isNotRelative;
     checkPath.convert = (p2) => p2;
     var Ignore = class {
@@ -23019,7 +23019,7 @@ var require_ignore = __commonJS({
       //   setting `checkUnignored` to `false` could reduce additional
       //   path matching.
       // @returns {TestResult} true if a file is ignored
-      _testOne(path11, checkUnignored) {
+      _testOne(path12, checkUnignored) {
         let ignored = false;
         let unignored = false;
         this._rules.forEach((rule) => {
@@ -23027,7 +23027,7 @@ var require_ignore = __commonJS({
           if (unignored === negative && ignored !== unignored || negative && !ignored && !unignored && !checkUnignored) {
             return;
           }
-          const matched = rule.regex.test(path11);
+          const matched = rule.regex.test(path12);
           if (matched) {
             ignored = !negative;
             unignored = negative;
@@ -23040,24 +23040,24 @@ var require_ignore = __commonJS({
       }
       // @returns {TestResult}
       _test(originalPath, cache, checkUnignored, slices) {
-        const path11 = originalPath && checkPath.convert(originalPath);
+        const path12 = originalPath && checkPath.convert(originalPath);
         checkPath(
-          path11,
+          path12,
           originalPath,
           this._allowRelativePaths ? RETURN_FALSE : throwError
         );
-        return this._t(path11, cache, checkUnignored, slices);
+        return this._t(path12, cache, checkUnignored, slices);
       }
-      _t(path11, cache, checkUnignored, slices) {
-        if (path11 in cache) {
-          return cache[path11];
+      _t(path12, cache, checkUnignored, slices) {
+        if (path12 in cache) {
+          return cache[path12];
         }
         if (!slices) {
-          slices = path11.split(SLASH);
+          slices = path12.split(SLASH);
         }
         slices.pop();
         if (!slices.length) {
-          return cache[path11] = this._testOne(path11, checkUnignored);
+          return cache[path12] = this._testOne(path12, checkUnignored);
         }
         const parent = this._t(
           slices.join(SLASH) + SLASH,
@@ -23065,24 +23065,24 @@ var require_ignore = __commonJS({
           checkUnignored,
           slices
         );
-        return cache[path11] = parent.ignored ? parent : this._testOne(path11, checkUnignored);
+        return cache[path12] = parent.ignored ? parent : this._testOne(path12, checkUnignored);
       }
-      ignores(path11) {
-        return this._test(path11, this._ignoreCache, false).ignored;
+      ignores(path12) {
+        return this._test(path12, this._ignoreCache, false).ignored;
       }
       createFilter() {
-        return (path11) => !this.ignores(path11);
+        return (path12) => !this.ignores(path12);
       }
       filter(paths) {
         return makeArray(paths).filter(this.createFilter());
       }
       // @returns {TestResult}
-      test(path11) {
-        return this._test(path11, this._testCache, true);
+      test(path12) {
+        return this._test(path12, this._testCache, true);
       }
     };
     var factory = (options) => new Ignore(options);
-    var isPathValid = (path11) => checkPath(path11 && checkPath.convert(path11), path11, RETURN_FALSE);
+    var isPathValid = (path12) => checkPath(path12 && checkPath.convert(path12), path12, RETURN_FALSE);
     factory.isPathValid = isPathValid;
     factory.default = factory;
     module2.exports = factory;
@@ -23093,7 +23093,7 @@ var require_ignore = __commonJS({
       const makePosix = (str) => /^\\\\\?\\/.test(str) || /["<>|\u0000-\u001F]+/u.test(str) ? str : str.replace(/\\/g, "/");
       checkPath.convert = makePosix;
       const REGIX_IS_WINDOWS_PATH_ABSOLUTE = /^[a-z]:\//i;
-      checkPath.isNotRelative = (path11) => REGIX_IS_WINDOWS_PATH_ABSOLUTE.test(path11) || isNotRelative(path11);
+      checkPath.isNotRelative = (path12) => REGIX_IS_WINDOWS_PATH_ABSOLUTE.test(path12) || isNotRelative(path12);
     }
   }
 });
@@ -23106,7 +23106,7 @@ __export(extension_exports, {
 });
 module.exports = __toCommonJS(extension_exports);
 var vscode4 = __toESM(require("vscode"));
-var path10 = __toESM(require("path"));
+var path11 = __toESM(require("path"));
 var fs9 = __toESM(require("fs"));
 
 // src/config.ts
@@ -27034,35 +27034,57 @@ Resolve each conflict with Upload Active File or Download Active File after choo
   }
   /** Upload local changes only; never traverse or download the remote tree. */
   async uploadChanged(client, options = {}) {
-    var _a, _b, _c, _d, _e2, _f, _g, _h, _i2;
+    var _a, _b, _c, _d, _e2, _f, _g, _h, _i2, _j;
     preparedPlan = void 0;
     const state = new SyncState(this.config), filter = (0, import_ignore2.default)().add(this.config.ignore ?? []).add(SYNC_EXCLUDES);
     await state.load();
     this.cache = new ScanCache(this.config.localPath);
     await this.cache.load();
-    const local = await this.collectLocal(filter, options.files, options), candidates = [...local].filter(([file, entry]) => {
-      var _a2;
-      return !entry.isDirectory && !entry.isSymbolicLink && (options.files ? options.files.includes(file) : state.records.has(file)) && !sameLocal(entry, (_a2 = state.records.get(file)) == null ? void 0 : _a2.local);
-    });
+    const local = await this.collectLocal(filter, options.files, options), selected = options.files && new Set(options.files), candidates = [], previouslyUploaded = [];
+    for (const [file, entry] of local) {
+      if (entry.isDirectory || entry.isSymbolicLink || !(selected ? selected.has(file) : state.records.has(file))) {
+        continue;
+      }
+      if (!sameLocal(entry, (_a = state.records.get(file)) == null ? void 0 : _a.local)) {
+        candidates.push([file, entry]);
+      } else if (selected) {
+        previouslyUploaded.push([file, entry]);
+      }
+    }
+    const remoteRoot = this.config.remotePath;
+    if (client.statMany && previouslyUploaded.length) {
+      const stats = await client.statMany(previouslyUploaded.map(([file]) => path6.posix.join(remoteRoot, file)));
+      for (const item of previouslyUploaded) {
+        if (!stats.get(path6.posix.join(remoteRoot, item[0]))) {
+          candidates.push(item);
+        }
+      }
+    } else {
+      for (const item of previouslyUploaded) {
+        if (!await client.stat(path6.posix.join(remoteRoot, item[0]))) {
+          candidates.push(item);
+        }
+      }
+    }
     let next = 0, completed = 0, failed = false;
     const transferTimer = new TransferTimer();
-    (_a = options.onState) == null ? void 0 : _a.call(options, {
+    (_b = options.onState) == null ? void 0 : _b.call(options, {
       phase: "Uploading local changes",
       current: 0,
       total: candidates.length,
       percent: 0,
       ...transferTimer.snapshot()
     });
-    (_b = options.onLog) == null ? void 0 : _b.call(options, `Local changes: ${candidates.length}; no recursive remote scan.
+    (_c = options.onLog) == null ? void 0 : _c.call(options, `Local changes: ${candidates.length}; no recursive remote scan.
 `);
     if (client.putMany && candidates.length > 1) {
       try {
-        const remoteRoot = this.config.remotePath, remotePaths = /* @__PURE__ */ new Set();
+        const remoteRoot2 = this.config.remotePath, remotePaths = /* @__PURE__ */ new Set();
         for (const [file, entry] of candidates) {
-          remotePaths.add(path6.posix.join(remoteRoot, file));
+          remotePaths.add(path6.posix.join(remoteRoot2, file));
           let parent = path6.posix.dirname(file);
           while (parent !== ".") {
-            remotePaths.add(path6.posix.join(remoteRoot, parent));
+            remotePaths.add(path6.posix.join(remoteRoot2, parent));
             parent = path6.posix.dirname(parent);
           }
           await this.assertLocalPath(file);
@@ -27075,53 +27097,53 @@ Resolve each conflict with Upload Active File or Download Active File after choo
         for (const [file, entry] of candidates) {
           let parent = path6.posix.dirname(file);
           while (parent !== ".") {
-            const target = remoteStats.get(path6.posix.join(remoteRoot, parent));
+            const target = remoteStats.get(path6.posix.join(remoteRoot2, parent));
             if (target && (!target.isDirectory || target.isSymbolicLink)) {
               throw new Error(`Unsafe remote parent: ${parent}`);
             }
             parent = path6.posix.dirname(parent);
           }
-          const remote = remoteStats.get(path6.posix.join(remoteRoot, file));
+          const remote = remoteStats.get(path6.posix.join(remoteRoot2, file));
           if ((remote == null ? void 0 : remote.isDirectory) || (remote == null ? void 0 : remote.isSymbolicLink)) {
             throw new Error(`Not a regular remote file: ${file}`);
           }
           const item = { file, action: "upload", local: entry, remote };
           items.push(item);
-          (_c = options.onLog) == null ? void 0 : _c.call(options, `UPLOAD local to server: ${file} \u2014 started
+          (_d = options.onLog) == null ? void 0 : _d.call(options, `UPLOAD local to server: ${file} \u2014 started
 `);
         }
         const stopTiming = transferTimer.start("upload");
-        (_d = options.onState) == null ? void 0 : _d.call(options, transferTimer.snapshot());
+        (_e2 = options.onState) == null ? void 0 : _e2.call(options, transferTimer.snapshot());
         try {
           await client.putMany(items.map((item) => ({
             localPath: path6.join(this.config.localPath, item.file),
             remotePath: path6.posix.join(this.config.remotePath, item.file)
           })));
         } finally {
-          (_e2 = options.onState) == null ? void 0 : _e2.call(options, stopTiming());
+          (_f = options.onState) == null ? void 0 : _f.call(options, stopTiming());
         }
-        const uploadedPaths = items.map((item) => path6.posix.join(remoteRoot, item.file)), uploadedStats = client.statMany ? await client.statMany(uploadedPaths) : new Map(await Promise.all(uploadedPaths.map(async (remotePath) => [remotePath, await client.stat(remotePath)])));
+        const uploadedPaths = items.map((item) => path6.posix.join(remoteRoot2, item.file)), uploadedStats = client.statMany ? await client.statMany(uploadedPaths) : new Map(await Promise.all(uploadedPaths.map(async (remotePath) => [remotePath, await client.stat(remotePath)])));
         for (const item of items) {
-          const afterLocal = await fingerprintLocal(path6.join(this.config.localPath, item.file)), afterRemote = uploadedStats.get(path6.posix.join(remoteRoot, item.file));
+          const afterLocal = await fingerprintLocal(path6.join(this.config.localPath, item.file)), afterRemote = uploadedStats.get(path6.posix.join(remoteRoot2, item.file));
           if (!afterLocal || !afterRemote || afterRemote.isDirectory || afterRemote.size !== afterLocal.size || !sameLocal(afterLocal, item.local)) {
             throw new Error(`File changed during transfer; sync history was not updated: ${item.file}`);
           }
-          (_f = this.cache) == null ? void 0 : _f.remember(item.file, afterLocal);
+          (_g = this.cache) == null ? void 0 : _g.remember(item.file, afterLocal);
           state.records.set(item.file, {
             local: afterLocal,
             remote: { size: afterRemote.size, modifyTime: afterRemote.modifyTime }
           });
           completed++;
-          (_g = options.onLog) == null ? void 0 : _g.call(options, `UPLOAD local to server: ${item.file} \u2014 done
+          (_h = options.onLog) == null ? void 0 : _h.call(options, `UPLOAD local to server: ${item.file} \u2014 done
 `);
-          (_h = options.onState) == null ? void 0 : _h.call(options, {
+          (_i2 = options.onState) == null ? void 0 : _i2.call(options, {
             file: item.file,
             current: completed,
             percent: Math.min(99, Math.floor(100 * completed / candidates.length))
           });
         }
       } catch (error) {
-        (_i2 = options.onLog) == null ? void 0 : _i2.call(options, `UPLOAD batch \u2014 failed: ${error.message}
+        (_j = options.onLog) == null ? void 0 : _j.call(options, `UPLOAD batch \u2014 failed: ${error.message}
 `);
         throw error;
       } finally {
@@ -28827,7 +28849,14 @@ var PendingUploads = class {
   }
   /** Records the latest observed file version and persists its path. */
   record(config, file) {
-    this.entries(config).set(file, ++this.sequence);
+    return this.recordMany(config, [file]);
+  }
+  /** Persists all paths from a revision change in one journal update. */
+  recordMany(config, files) {
+    const queue = this.entries(config);
+    for (const file of files) {
+      queue.set(file, ++this.sequence);
+    }
     return this.persist(config);
   }
   /** Removes only versions successfully handled by the supplied batch. */
@@ -28960,6 +28989,25 @@ var LocalChangeDiscovery = class {
   }
 };
 
+// src/git-changes.ts
+var import_child_process = require("child_process");
+var path10 = __toESM(require("path"));
+var import_util = require("util");
+var git = (0, import_util.promisify)(import_child_process.execFile);
+async function changedGitPaths(root, before, after, signal) {
+  const { stdout } = await git("git", [
+    "diff",
+    "--name-only",
+    "--no-renames",
+    "--diff-filter=AMT",
+    "-z",
+    before,
+    after,
+    "--"
+  ], { cwd: root, signal, maxBuffer: 16 * 1024 * 1024 });
+  return stdout.split("\0").filter(Boolean).map((file) => path10.join(root, file));
+}
+
 // src/extension.ts
 var outputChannel;
 var extensionContext;
@@ -29059,14 +29107,78 @@ Files: ${state.current}/${state.total ?? "?"} | Local: ${state.localFiles} | Rem
     outputChannel.appendLine(`[auto-login] ${error.message}`);
     updateSftpStatus("$(warning) SFTP: not logged in");
   });
+  void watchGitChanges(context, discoveryController.signal);
   await discoverLocalUploads();
+}
+async function watchGitChanges(context, signal) {
+  var _a;
+  const extension = (_a = vscode4.extensions) == null ? void 0 : _a.getExtension("vscode.git");
+  if (!extension) {
+    return;
+  }
+  try {
+    const git2 = (await extension.activate()).getAPI(1), watched = /* @__PURE__ */ new WeakSet();
+    if (signal.aborted) {
+      return;
+    }
+    const watch = (repository) => {
+      var _a2;
+      if (watched.has(repository)) {
+        return;
+      }
+      watched.add(repository);
+      let previous = (_a2 = repository.state.HEAD) == null ? void 0 : _a2.commit, pending = Promise.resolve();
+      context.subscriptions.push(repository.state.onDidChange(() => {
+        var _a3;
+        const before = previous, after = (_a3 = repository.state.HEAD) == null ? void 0 : _a3.commit;
+        if (!after || before === after) {
+          return;
+        }
+        previous = after;
+        if (!before || signal.aborted) {
+          return;
+        }
+        pending = pending.then(async () => {
+          const config = getConfiguration(), files = await changedGitPaths(repository.rootUri.fsPath, before, after, signal), eligible = files.filter((file) => isUploadPath(config, file));
+          if (signal.aborted || !eligible.length) {
+            return;
+          }
+          await pendingUploads.recordMany(config, eligible);
+          if (signal.aborted) {
+            return;
+          }
+          outputChannel.appendLine(`[git] Queued ${eligible.length} paths after revision change.`);
+          if (getConfiguration().uploadOnAutoSave === true) {
+            saveUploads == null ? void 0 : saveUploads.request();
+          }
+        }).catch(async (error) => {
+          if (signal.aborted) {
+            return;
+          }
+          outputChannel.appendLine(`[git] Could not enumerate revision changes: ${error.message}`);
+          if (discovery) {
+            await discovery;
+          }
+          await discoverLocalUploads();
+        });
+      }));
+    };
+    for (const repository of git2.repositories) {
+      watch(repository);
+    }
+    context.subscriptions.push(git2.onDidOpenRepository(watch));
+  } catch (error) {
+    if (!signal.aborted) {
+      outputChannel.appendLine(`[git] Could not observe revisions: ${error.message}`);
+    }
+  }
 }
 function discoverLocalUploads() {
   if (discovery) {
     return discovery;
   }
   const config = getConfiguration(), mode = resolveMode(config), controller = discoveryController;
-  if (!config.localPath || !path10.isAbsolute(config.localPath) || !config.remotePath || (mode === "ftp" ? !config.ftpHost || !config.ftpUser : !config.sftpHost || !config.sftpUser) || mode === "teleport" && (!config.teleportHost || !config.teleportUser)) {
+  if (!config.localPath || !path11.isAbsolute(config.localPath) || !config.remotePath || (mode === "ftp" ? !config.ftpHost || !config.ftpUser : !config.sftpHost || !config.sftpUser) || mode === "teleport" && (!config.teleportHost || !config.teleportUser)) {
     return Promise.resolve();
   }
   const journal = pendingUploads;
@@ -29141,8 +29253,8 @@ function resolveLocalRoot(config) {
     throw new Error("localPath is not configured");
   }
   let root = config.localPath;
-  if (!path10.isAbsolute(root) && vscode4.workspace.workspaceFolders && vscode4.workspace.workspaceFolders.length > 0) {
-    root = path10.join(vscode4.workspace.workspaceFolders[0].uri.fsPath, root);
+  if (!path11.isAbsolute(root) && vscode4.workspace.workspaceFolders && vscode4.workspace.workspaceFolders.length > 0) {
+    root = path11.join(vscode4.workspace.workspaceFolders[0].uri.fsPath, root);
   }
   return root;
 }
@@ -29282,12 +29394,12 @@ function openConfigPanel(context) {
     vscode4.ViewColumn.One,
     {
       enableScripts: true,
-      localResourceRoots: [vscode4.Uri.file(path10.join(context.extensionPath, "src", "webview"))]
+      localResourceRoots: [vscode4.Uri.file(path11.join(context.extensionPath, "src", "webview"))]
     }
   );
   configPanel = panel;
   context.subscriptions.push(panel);
-  const htmlPath = path10.join(context.extensionPath, "src", "webview", "config.html"), jsPath = path10.join(context.extensionPath, "src", "webview", "config.js"), jsContent = fs9.readFileSync(jsPath, "utf8");
+  const htmlPath = path11.join(context.extensionPath, "src", "webview", "config.html"), jsPath = path11.join(context.extensionPath, "src", "webview", "config.js"), jsContent = fs9.readFileSync(jsPath, "utf8");
   let html = fs9.readFileSync(htmlPath, "utf8");
   html = html.replace(/{{script}}/g, `<script type="text/javascript">
 ${jsContent}
@@ -29496,8 +29608,8 @@ function isUploadPath(config, file) {
       exclusions = normalizeRsyncOptions(config).ignore ?? [];
     } catch {
     }
-    const relative6 = path10.relative(resolveLocalRoot(config), file).replace(/\\/g, "/");
-    return !!relative6 && relative6 !== ".." && !relative6.startsWith("../") && !path10.isAbsolute(relative6) && !isIgnored(relative6, [...exclusions, ...SYNC_EXCLUDES]);
+    const relative6 = path11.relative(resolveLocalRoot(config), file).replace(/\\/g, "/");
+    return !!relative6 && relative6 !== ".." && !relative6.startsWith("../") && !path11.isAbsolute(relative6) && !isIgnored(relative6, [...exclusions, ...SYNC_EXCLUDES]);
   } catch {
     return false;
   }
@@ -29541,7 +29653,7 @@ async function uploadSavedChanges() {
     await pendingUploads.flush();
     syncTask.update({ phase: "Preparing uploads" });
     const batch = new Map([...pendingUploads.entries(config)].filter(([file]) => isUploadPath(config, file))), root = resolveLocalRoot(config), result = await uploadChangedFiles(config, {
-      files: [...batch.keys()].map((file) => path10.relative(root, file).replace(/\\/g, "/")),
+      files: [...batch.keys()].map((file) => path11.relative(root, file).replace(/\\/g, "/")),
       onLog: (text) => {
         syncTask.log(text);
         outputChannel.appendLine(text.trimEnd());
