@@ -33,9 +33,22 @@ export interface TaskSnapshot extends SyncProgress {
     progressReset?: boolean;
 }
 
+type LogLevel = 'ok' | 'error' | 'warning';
+
+interface TransferLine {
+    text: string;
+    level?: LogLevel;
+}
+
+const transferLogLimit = 2000;
+
 /** Extension-owned state. Observer failure can never fail the synchronization. */
 export class SyncTask {
-    private state?: TaskSnapshot;
+    private state?: Omit<TaskSnapshot, 'logs'>;
+    private readonly logLines: TransferLine[] = [];
+    private nextLogLine = 0;
+    private logNotificationScheduled = false;
+    private readonly logListeners = new Set<() => void>();
     private readonly listeners = new Set<(state: TaskSnapshot) => void>();
     private timer?: ReturnType<typeof setInterval>;
 
@@ -45,7 +58,7 @@ export class SyncTask {
     constructor(private readonly completionDisplayMs = 1500) {}
 
     snapshot(): TaskSnapshot | undefined {
-        return this.state ? { ...this.state, logs: [...this.state.logs] } : undefined;
+        return this.state ? { ...this.state, logs: this.logLines.map(({ text }) => text) } : undefined;
     }
 
     subscribe(listener: (state: TaskSnapshot) => void): () => void {
@@ -59,7 +72,7 @@ export class SyncTask {
         this.state = { id: randomUUID(), dryRun, status: 'running', startedAt: Date.now(), elapsedMs: 0,
             phase: 'Connecting', current: 0, completedBytes: 0, localFiles: 0, remoteFiles: 0,
             directories: 0, uploadMs: 0, downloadMs: 0, uploadActive: false, downloadActive: false,
-            file: '', logs: [] };
+            file: '' };
         this.timingUpdatedAt = this.state.startedAt;
         this.publish();
         this.timer = setInterval(() => this.publish(), 250);
@@ -73,10 +86,37 @@ export class SyncTask {
         }
     }
 
-    log(text: string): void {
-        if (!this.state) { return; }
-        this.state.logs.push(text.slice(-2000));
-        if (this.state.logs.length > 500) { this.state.logs.shift(); }
+    /** Appends individual console lines and discards the oldest overflow. */
+    log(text: string, level?: LogLevel): void {
+        if (!text) { return; }
+        const lines = text.replace(/\r\n?/g, '\n').replace(/\n$/, '').split('\n');
+        this.nextLogLine += lines.length;
+        this.logLines.push(...lines.slice(-transferLogLimit).map((line) => ({ text: line, level })));
+        if (this.logLines.length > transferLogLimit) {
+            this.logLines.splice(0, this.logLines.length - transferLogLimit);
+        }
+        if (this.logNotificationScheduled) { return; }
+        this.logNotificationScheduled = true;
+        queueMicrotask(() => {
+            this.logNotificationScheduled = false;
+            for (const listener of this.logListeners) {
+                try { listener(); }
+                catch { this.logListeners.delete(listener); }
+            }
+        });
+    }
+
+    /** Subscribes to changes in the shared console history. */
+    subscribeLog(listener: () => void): () => void {
+        this.logListeners.add(listener);
+        return () => this.logListeners.delete(listener);
+    }
+
+    /** Returns retained lines not yet sent to the panel and the absolute position of the first. */
+    logSnapshot(from = 0): { start: number; lines: TransferLine[] } {
+        const oldest = this.nextLogLine - this.logLines.length,
+            start = Math.max(oldest, Math.min(from, this.nextLogLine));
+        return { start, lines: this.logLines.slice(start - oldest) };
     }
 
     /**
@@ -93,7 +133,7 @@ export class SyncTask {
         this.advanceTransferTimings();
         this.state.elapsedMs = Date.now() - this.state.startedAt;
         const timedResult = `${result}\nSession time: ${this.state.elapsedMs} ms\nUpload time: ${this.state.uploadMs} ms\nDownload time: ${this.state.downloadMs} ms`;
-        this.log(timedResult + '\n');
+        this.log(timedResult, error ? 'error' : warning || result.includes('WITH CONFLICTS') ? 'warning' : 'ok');
         Object.assign(this.state, { result,
             status: error ? 'error' : warning || result.includes('WITH CONFLICTS') ? 'warning' : 'complete',
             phase: error ? this.state.phase + ' — failed' : warning ? 'Restarting upload'
@@ -116,6 +156,7 @@ export class SyncTask {
         clearTimeout(this.resetTimer);
         clearInterval(this.timer);
         this.listeners.clear();
+        this.logListeners.clear();
     }
 
     private publish(updateElapsed = true): void {

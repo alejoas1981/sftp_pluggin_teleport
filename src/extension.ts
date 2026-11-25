@@ -100,6 +100,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
     autoLogin().catch((error: any) => {
         outputChannel.appendLine(`[auto-login] ${error.message}`);
+        syncTask.log(error.message, 'error');
         updateSftpStatus('$(warning) SFTP: not logged in');
     });
     void watchGitChanges(context, discoveryController.signal);
@@ -315,6 +316,7 @@ async function uploadActiveFile(config: SftpConfig): Promise<void> {
     try {
         const [localPath] = await withActiveFile(config, (localPath) => uploadFile(config, localPath));
         outputChannel.appendLine(`Uploaded ${localPath}`);
+        syncTask.log(`Uploaded ${localPath}`, 'ok');
     } finally {
         stopLoading();
     }
@@ -330,6 +332,7 @@ async function downloadActiveFile(config: SftpConfig): Promise<void> {
     try {
         const [localPath] = await withActiveFile(config, (localPath) => downloadFile(config, localPath));
         outputChannel.appendLine(`Downloaded ${localPath}`);
+        syncTask.log(`Downloaded ${localPath}`, 'ok');
     } finally {
         stopLoading();
     }
@@ -343,6 +346,7 @@ async function downloadActiveFile(config: SftpConfig): Promise<void> {
 async function deleteActiveFile(config: SftpConfig): Promise<void> {
     const [localPath] = await withActiveFile(config, (localPath) => deleteRemoteFile(config, localPath));
     outputChannel.appendLine(`Deleted remote ${localPath}`);
+    syncTask.log(`Deleted remote ${localPath}`, 'ok');
 }
 
 /**
@@ -353,6 +357,7 @@ async function deleteActiveFile(config: SftpConfig): Promise<void> {
 async function syncActiveFile(config: SftpConfig): Promise<void> {
     const [localPath, result] = await withActiveFile(config, (localPath) => syncFile(config, localPath));
     outputChannel.appendLine(`${result}: ${localPath}`);
+    syncTask.log(`${result}: ${localPath}`, 'ok');
 }
 
 /**
@@ -430,10 +435,11 @@ function stopWatcher(): void {
 /** Cancels the active transfer while preserving queued paths for a later request. */
 function cancelTransfer(): void {
     if (!cancelActiveTransfer()) {
-        vscode.window.showInformationMessage('No active SFTP transfer');
+        syncTask.log('No active SFTP transfer', 'warning');
         return;
     }
     outputChannel.appendLine('Cancelling active transfer…');
+    syncTask.log('Cancelling active transfer…', 'warning');
 }
 
 /**
@@ -468,11 +474,20 @@ function openConfigPanel(context: vscode.ExtensionContext) {
         try { Promise.resolve(panel.webview.postMessage(message)).catch(() => { /* Detached UI cannot fail a task. */ }); }
         catch { /* VS Code may throw synchronously after disposal. */ }
     },
-        unsubscribe = syncTask.subscribe((state) => post({ command: 'syncState', state }));
+        /** Sends only new console lines during a transfer, and full history on panel load. */
+        postLog = (restore = false): void => {
+            const log = syncTask.logSnapshot(restore ? 0 : nextLogLine);
+            nextLogLine = log.start + log.lines.length;
+            if (log.lines.length) { post({ command: 'transferLog', ...log }); }
+        },
+        unsubscribeLog = syncTask.subscribeLog(postLog),
+        unsubscribe = syncTask.subscribe(({ logs: _logs, ...state }) => post({ command: 'syncState', state }));
+    let nextLogLine = 0;
     panel.onDidDispose(() => {
         disposed = true;
         if (configPanel === panel) { configPanel = undefined; }
         unsubscribe();
+        unsubscribeLog();
     });
 
     panel.webview.html = html;
@@ -488,10 +503,12 @@ function openConfigPanel(context: vscode.ExtensionContext) {
         }
         switch (message.command) {
             case 'getSyncState': {
+                postLog(true);
                 post({ command: 'syncState', state: syncTask.snapshot() });
                 break;
             }
             case 'ready': {
+                postLog(true);
                 post({ command: 'syncState', state: syncTask.snapshot() });
                 const cfg = getConfiguration();
                 if (workspaceFolder && !cfg.localPath) { cfg.localPath = workspaceFolder; }
@@ -510,11 +527,13 @@ function openConfigPanel(context: vscode.ExtensionContext) {
                 try {
                     await saveConfiguration(context, message.config);
                     await discoverLocalUploads();
+                    syncTask.log('Configuration saved privately for this workspace', 'ok');
                     post({ command: 'saved' });
                     outputChannel.appendLine('SFTP configuration saved');
                 } catch (error: any) {
                     outputChannel.appendLine(`[save error] ${error.message}`);
-                    post({ command: 'error', detail: error.message });
+                    syncTask.log(error.message, 'error');
+                    post({ command: 'error' });
                 }
                 break;
             }
@@ -525,12 +544,16 @@ function openConfigPanel(context: vscode.ExtensionContext) {
                         throw new Error('Teleport host and user are required');
                     }
                     startLoading();
-                    const result = await ensureTeleportSession(cfg, { onLink: openTeleportLink, onConfirmTrust: confirmTeleportTrust });
-                    outputChannel.appendLine(result);
-                    post({ command: 'loginResult', status: 'ok', detail: 'Login successful' });
+                    await ensureTeleportSession(cfg, {
+                        onLink: openTeleportLink,
+                        onConfirmTrust: confirmTeleportTrust
+                    });
+                    syncTask.log('Login successful', 'ok');
+                    post({ command: 'loginResult', status: 'ok' });
                     stopLoading();
                 } catch (error: any) {
-                    post({ command: 'loginResult', status: 'error', detail: error.message });
+                    syncTask.log(error.message, 'error');
+                    post({ command: 'loginResult', status: 'error' });
                     stopLoading('$(error) SFTP: error');
                 }
                 break;
@@ -542,17 +565,18 @@ function openConfigPanel(context: vscode.ExtensionContext) {
                     startLoading();
                     const result = await testConnection(cfg);
                     stopLoading();
-                    post({ command: 'testResult', status: 'ok', detail: result });
+                    syncTask.log(result, 'ok');
+                    post({ command: 'testResult', status: 'ok' });
                 } catch (error: any) {
                     stopLoading('$(error) SFTP: error');
-                    post({ command: 'testResult', status: 'error', detail: error.message });
+                    syncTask.log(error.message, 'error');
+                    post({ command: 'testResult', status: 'error' });
                 }
                 break;
             }
             case 'cancel': {
                 const cancelled = cancelActiveTransfer();
-                post({ command: 'cancelResult', status: cancelled ? 'warning' : 'error',
-                    detail: cancelled ? 'Cancelling transfer…' : 'No active transfer' });
+                syncTask.log(cancelled ? 'Cancelling transfer…' : 'No active transfer', cancelled ? 'warning' : 'error');
                 break;
             }
             case 'sync':
@@ -563,7 +587,8 @@ function openConfigPanel(context: vscode.ExtensionContext) {
                 } catch (error: any) {
                     post({ command: 'syncState', state: syncTask.snapshot() });
                     if (!syncInProgress && syncTask.snapshot()?.result !== error.message) {
-                        post({ command: 'error', detail: error.message });
+                        syncTask.log(error.message, 'error');
+                        post({ command: 'error' });
                     }
                 }
                 break;
@@ -574,6 +599,7 @@ function openConfigPanel(context: vscode.ExtensionContext) {
                     await vscode.window.showTextDocument(doc, { preview: false });
                 } catch (error: any) {
                     outputChannel.appendLine(`[open file error] ${error.message}`);
+                    syncTask.log(error.message, 'error');
                     vscode.window.showErrorMessage(error.message);
                 }
                 break;
@@ -587,9 +613,15 @@ function openConfigPanel(context: vscode.ExtensionContext) {
                         'Delete'
                     );
                 if (choice === 'Delete') {
-                    await deleteConfiguration(context, mode as any);
-                    post({ command: 'deleted' });
-                    outputChannel.appendLine(`${modeLabel} configuration deleted`);
+                    try {
+                        await deleteConfiguration(context, mode as any);
+                        syncTask.log('Configuration deleted', 'ok');
+                        post({ command: 'deleted' });
+                        outputChannel.appendLine(`${modeLabel} configuration deleted`);
+                    } catch (error: any) {
+                        syncTask.log(error.message, 'error');
+                        post({ command: 'error' });
+                    }
                 }
                 break;
             }
@@ -692,6 +724,7 @@ async function uploadSavedChanges(): Promise<void> {
         catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             updateSftpStatus('$(warning) SFTP waiting for Teleport', message);
+            syncTask.log(`Teleport login failed. ${message}`, 'error');
             throw new Error(`Teleport login failed. ${message}`);
         }
     }

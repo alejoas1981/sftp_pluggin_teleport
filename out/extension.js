@@ -28615,14 +28615,19 @@ function stopLoading(text) {
 
 // src/sync-task.ts
 var import_crypto4 = require("crypto");
+var transferLogLimit = 2e3;
 var SyncTask = class {
   constructor(completionDisplayMs = 1500) {
     this.completionDisplayMs = completionDisplayMs;
+    this.logLines = [];
+    this.nextLogLine = 0;
+    this.logNotificationScheduled = false;
+    this.logListeners = /* @__PURE__ */ new Set();
     this.listeners = /* @__PURE__ */ new Set();
     this.timingUpdatedAt = 0;
   }
   snapshot() {
-    return this.state ? { ...this.state, logs: [...this.state.logs] } : void 0;
+    return this.state ? { ...this.state, logs: this.logLines.map(({ text }) => text) } : void 0;
   }
   subscribe(listener) {
     this.listeners.add(listener);
@@ -28650,8 +28655,7 @@ var SyncTask = class {
       downloadMs: 0,
       uploadActive: false,
       downloadActive: false,
-      file: "",
-      logs: []
+      file: ""
     };
     this.timingUpdatedAt = this.state.startedAt;
     this.publish();
@@ -28664,14 +28668,41 @@ var SyncTask = class {
       Object.assign(this.state, progress);
     }
   }
-  log(text) {
-    if (!this.state) {
+  /** Appends individual console lines and discards the oldest overflow. */
+  log(text, level) {
+    if (!text) {
       return;
     }
-    this.state.logs.push(text.slice(-2e3));
-    if (this.state.logs.length > 500) {
-      this.state.logs.shift();
+    const lines = text.replace(/\r\n?/g, "\n").replace(/\n$/, "").split("\n");
+    this.nextLogLine += lines.length;
+    this.logLines.push(...lines.slice(-transferLogLimit).map((line) => ({ text: line, level })));
+    if (this.logLines.length > transferLogLimit) {
+      this.logLines.splice(0, this.logLines.length - transferLogLimit);
     }
+    if (this.logNotificationScheduled) {
+      return;
+    }
+    this.logNotificationScheduled = true;
+    queueMicrotask(() => {
+      this.logNotificationScheduled = false;
+      for (const listener of this.logListeners) {
+        try {
+          listener();
+        } catch {
+          this.logListeners.delete(listener);
+        }
+      }
+    });
+  }
+  /** Subscribes to changes in the shared console history. */
+  subscribeLog(listener) {
+    this.logListeners.add(listener);
+    return () => this.logListeners.delete(listener);
+  }
+  /** Returns retained lines not yet sent to the panel and the absolute position of the first. */
+  logSnapshot(from = 0) {
+    const oldest = this.nextLogLine - this.logLines.length, start = Math.max(oldest, Math.min(from, this.nextLogLine));
+    return { start, lines: this.logLines.slice(start - oldest) };
   }
   /**
    * Completes the active task and appends stable timing metrics to its log.
@@ -28693,7 +28724,7 @@ var SyncTask = class {
 Session time: ${this.state.elapsedMs} ms
 Upload time: ${this.state.uploadMs} ms
 Download time: ${this.state.downloadMs} ms`;
-    this.log(timedResult + "\n");
+    this.log(timedResult, error ? "error" : warning || result.includes("WITH CONFLICTS") ? "warning" : "ok");
     Object.assign(this.state, {
       result,
       status: error ? "error" : warning || result.includes("WITH CONFLICTS") ? "warning" : "complete",
@@ -28719,6 +28750,7 @@ Download time: ${this.state.downloadMs} ms`;
     clearTimeout(this.resetTimer);
     clearInterval(this.timer);
     this.listeners.clear();
+    this.logListeners.clear();
   }
   publish(updateElapsed = true) {
     if (!this.state) {
@@ -29105,6 +29137,7 @@ Files: ${state.current}/${state.total ?? "?"} | Local: ${state.localFiles} | Rem
   }
   autoLogin().catch((error) => {
     outputChannel.appendLine(`[auto-login] ${error.message}`);
+    syncTask.log(error.message, "error");
     updateSftpStatus("$(warning) SFTP: not logged in");
   });
   void watchGitChanges(context, discoveryController.signal);
@@ -29315,6 +29348,7 @@ async function uploadActiveFile(config) {
   try {
     const [localPath] = await withActiveFile(config, (localPath2) => uploadFile(config, localPath2));
     outputChannel.appendLine(`Uploaded ${localPath}`);
+    syncTask.log(`Uploaded ${localPath}`, "ok");
   } finally {
     stopLoading();
   }
@@ -29324,6 +29358,7 @@ async function downloadActiveFile(config) {
   try {
     const [localPath] = await withActiveFile(config, (localPath2) => downloadFile2(config, localPath2));
     outputChannel.appendLine(`Downloaded ${localPath}`);
+    syncTask.log(`Downloaded ${localPath}`, "ok");
   } finally {
     stopLoading();
   }
@@ -29331,10 +29366,12 @@ async function downloadActiveFile(config) {
 async function deleteActiveFile(config) {
   const [localPath] = await withActiveFile(config, (localPath2) => deleteRemoteFile(config, localPath2));
   outputChannel.appendLine(`Deleted remote ${localPath}`);
+  syncTask.log(`Deleted remote ${localPath}`, "ok");
 }
 async function syncActiveFile(config) {
   const [localPath, result] = await withActiveFile(config, (localPath2) => syncFile(config, localPath2));
   outputChannel.appendLine(`${result}: ${localPath}`);
+  syncTask.log(`${result}: ${localPath}`, "ok");
 }
 function validateFileInLocalPath(config, localPath) {
   if (!localPath.startsWith(resolveLocalRoot(config))) {
@@ -29378,10 +29415,11 @@ function stopWatcher() {
 }
 function cancelTransfer() {
   if (!cancelActiveTransfer()) {
-    vscode4.window.showInformationMessage("No active SFTP transfer");
+    syncTask.log("No active SFTP transfer", "warning");
     return;
   }
   outputChannel.appendLine("Cancelling active transfer\u2026");
+  syncTask.log("Cancelling active transfer\u2026", "warning");
 }
 function openConfigPanel(context) {
   if (configPanel) {
@@ -29414,13 +29452,21 @@ ${jsContent}
       });
     } catch {
     }
-  }, unsubscribe = syncTask.subscribe((state) => post({ command: "syncState", state }));
+  }, postLog = (restore = false) => {
+    const log = syncTask.logSnapshot(restore ? 0 : nextLogLine);
+    nextLogLine = log.start + log.lines.length;
+    if (log.lines.length) {
+      post({ command: "transferLog", ...log });
+    }
+  }, unsubscribeLog = syncTask.subscribeLog(postLog), unsubscribe = syncTask.subscribe(({ logs: _logs, ...state }) => post({ command: "syncState", state }));
+  let nextLogLine = 0;
   panel.onDidDispose(() => {
     disposed = true;
     if (configPanel === panel) {
       configPanel = void 0;
     }
     unsubscribe();
+    unsubscribeLog();
   });
   panel.webview.html = html;
   const workspaceFolder = vscode4.workspace.workspaceFolders && vscode4.workspace.workspaceFolders.length > 0 ? vscode4.workspace.workspaceFolders[0].uri.fsPath : void 0;
@@ -29432,10 +29478,12 @@ ${jsContent}
     }
     switch (message.command) {
       case "getSyncState": {
+        postLog(true);
         post({ command: "syncState", state: syncTask.snapshot() });
         break;
       }
       case "ready": {
+        postLog(true);
         post({ command: "syncState", state: syncTask.snapshot() });
         const cfg = getConfiguration();
         if (workspaceFolder && !cfg.localPath) {
@@ -29453,11 +29501,13 @@ ${jsContent}
         try {
           await saveConfiguration(context, message.config);
           await discoverLocalUploads();
+          syncTask.log("Configuration saved privately for this workspace", "ok");
           post({ command: "saved" });
           outputChannel.appendLine("SFTP configuration saved");
         } catch (error) {
           outputChannel.appendLine(`[save error] ${error.message}`);
-          post({ command: "error", detail: error.message });
+          syncTask.log(error.message, "error");
+          post({ command: "error" });
         }
         break;
       }
@@ -29468,12 +29518,16 @@ ${jsContent}
             throw new Error("Teleport host and user are required");
           }
           startLoading();
-          const result = await ensureTeleportSession(cfg, { onLink: openTeleportLink, onConfirmTrust: confirmTeleportTrust });
-          outputChannel.appendLine(result);
-          post({ command: "loginResult", status: "ok", detail: "Login successful" });
+          await ensureTeleportSession(cfg, {
+            onLink: openTeleportLink,
+            onConfirmTrust: confirmTeleportTrust
+          });
+          syncTask.log("Login successful", "ok");
+          post({ command: "loginResult", status: "ok" });
           stopLoading();
         } catch (error) {
-          post({ command: "loginResult", status: "error", detail: error.message });
+          syncTask.log(error.message, "error");
+          post({ command: "loginResult", status: "error" });
           stopLoading("$(error) SFTP: error");
         }
         break;
@@ -29487,20 +29541,18 @@ ${jsContent}
           startLoading();
           const result = await testConnection(cfg);
           stopLoading();
-          post({ command: "testResult", status: "ok", detail: result });
+          syncTask.log(result, "ok");
+          post({ command: "testResult", status: "ok" });
         } catch (error) {
           stopLoading("$(error) SFTP: error");
-          post({ command: "testResult", status: "error", detail: error.message });
+          syncTask.log(error.message, "error");
+          post({ command: "testResult", status: "error" });
         }
         break;
       }
       case "cancel": {
         const cancelled = cancelActiveTransfer();
-        post({
-          command: "cancelResult",
-          status: cancelled ? "warning" : "error",
-          detail: cancelled ? "Cancelling transfer\u2026" : "No active transfer"
-        });
+        syncTask.log(cancelled ? "Cancelling transfer\u2026" : "No active transfer", cancelled ? "warning" : "error");
         break;
       }
       case "sync":
@@ -29511,7 +29563,8 @@ ${jsContent}
         } catch (error) {
           post({ command: "syncState", state: syncTask.snapshot() });
           if (!syncInProgress && ((_a = syncTask.snapshot()) == null ? void 0 : _a.result) !== error.message) {
-            post({ command: "error", detail: error.message });
+            syncTask.log(error.message, "error");
+            post({ command: "error" });
           }
         }
         break;
@@ -29522,6 +29575,7 @@ ${jsContent}
           await vscode4.window.showTextDocument(doc, { preview: false });
         } catch (error) {
           outputChannel.appendLine(`[open file error] ${error.message}`);
+          syncTask.log(error.message, "error");
           vscode4.window.showErrorMessage(error.message);
         }
         break;
@@ -29533,9 +29587,15 @@ ${jsContent}
           "Delete"
         );
         if (choice === "Delete") {
-          await deleteConfiguration(context, mode);
-          post({ command: "deleted" });
-          outputChannel.appendLine(`${modeLabel} configuration deleted`);
+          try {
+            await deleteConfiguration(context, mode);
+            syncTask.log("Configuration deleted", "ok");
+            post({ command: "deleted" });
+            outputChannel.appendLine(`${modeLabel} configuration deleted`);
+          } catch (error) {
+            syncTask.log(error.message, "error");
+            post({ command: "error" });
+          }
         }
         break;
       }
@@ -29627,6 +29687,7 @@ async function uploadSavedChanges() {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       updateSftpStatus("$(warning) SFTP waiting for Teleport", message);
+      syncTask.log(`Teleport login failed. ${message}`, "error");
       throw new Error(`Teleport login failed. ${message}`);
     }
   }

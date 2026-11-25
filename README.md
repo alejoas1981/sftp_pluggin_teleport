@@ -129,7 +129,7 @@ These defaults are the values declared to VS Code. Required connection strings d
 
 The configuration panel is a single tab per extension host. Repeatedly invoking Open Configuration reveals that existing tab. Closing it allows a fresh tab to be created later. The configuration panel and status bar read shared task state. Closing the panel does not cancel a transfer. Reopening restores the current task or recent result. Use Cancel Transfer to interrupt the active transport. Pending uploads are durable, while the active task, recent logs and prepared plan are held in memory.
 
-Scanning shows stages, paths, counters and elapsed time. Transfer percentages advance as files complete, so a large active file can leave the percentage unchanged temporarily. Upload, download and session durations remain visible in results. The panel retains up to 500 recent entries with up to 2000 characters per entry. The Output channel receives the plain transfer log. Successful task progress returns to idle after a short delay.
+Scanning shows stages, paths, counters and elapsed time. Transfer percentages advance as files complete, so a large active file can leave the percentage unchanged temporarily. Upload, download and session durations remain visible in results. The Transfer Log retains the latest 2,000 lines across operations, including panel notifications. The Output channel receives the plain transfer log. Successful task progress returns to idle after a short delay.
 
 Transfer concurrency is bounded. FTP and FTPS use separate connections and serialize commands on each connection. Server limits may require lower transfer and scan concurrency. Teleport queued batches use one rsync process despite having multiple files.
 

@@ -95,6 +95,7 @@
         #activity-panel h2 { font-size: 14px; }
         #activity-log {
             height: 260px;
+            overflow-anchor: none;
             overflow: auto;
             white-space: pre-wrap;
             overflow-wrap: anywhere;
@@ -105,15 +106,6 @@
             color: var(--vscode-terminal-foreground, #eee);
             font: 12px/1.6 var(--vscode-editor-font-family, monospace);
         }
-        #status {
-            margin-top: 16px;
-            white-space: pre-wrap;
-            font-size: 13px;
-            min-height: 1.2em;
-        }
-        #status.ok { color: var(--vscode-terminal-ansiGreen); }
-        #status.warning { color: var(--vscode-editorWarning-foreground, #cca700); }
-        #status.error { color: var(--vscode-terminal-ansiRed); }
         #loader { display: none; margin-top: 16px; }
         .progress-outer {
             display: inline-block;
@@ -145,6 +137,7 @@
         }
         .log-started { color: var(--vscode-charts-blue, #3794ff); }
         .log-done { color: var(--vscode-testing-iconPassed, #73c991); }
+        .log-warning { color: var(--vscode-editorWarning-foreground, #cca700); }
         .log-error { color: var(--vscode-errorForeground, #f48771); }
         .progress-bar.indeterminate { animation: working 1.2s ease-in-out infinite alternate; background: var(--vscode-progressBar-background); }
         @keyframes working { from { opacity: .3; } to { opacity: 1; } }
@@ -231,7 +224,6 @@
             </button>
         </div>
     </form>
-    <div id="status"></div>
     <div id="settings-link" style="display:none; margin-top:8px; font-size:13px;"></div>
     <section id="activity-panel" hidden aria-label="Synchronization activity">
         <h2>Transfer log</h2>

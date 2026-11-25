@@ -27,30 +27,41 @@ const vscode = acquireVsCodeApi(),
     loader = document.getElementById('loader'),
     progressBar = document.getElementById('progress-bar'),
     progressPercent = document.getElementById('progress-percent'),
-    statusEl = document.getElementById('status'),
     activityPanel = document.getElementById('activity-panel'),
     activityLog = document.getElementById('activity-log');
 let progressInterval = null, progressHideTimeout = null, syncRunning = false;
 
-let activityLines = [];
+const transferLogLimit = 2000;
+let firstLogLine = 0, nextLogLine = 0;
 
-function renderActivity() {
-    const follow = activityLog.scrollHeight - activityLog.scrollTop - activityLog.clientHeight < 40;
-    activityLog.textContent = '';
-    for (const text of activityLines) {
-        const line = document.createElement('span');
-        line.className = text.includes(' — started') ? 'log-started' : text.includes(' — done') ? 'log-done'
-            : text.includes(' — failed') || text.startsWith('ERROR:') ? 'log-error' : '';
-        line.textContent = text;
-        activityLog.appendChild(line);
+/** Appends new console lines and adjusts scrolling when old lines are removed. */
+function renderActivity({ start, lines }) {
+    if (!lines.length || start + lines.length <= nextLogLine) { return; }
+    const follow = activityLog.scrollHeight - activityLog.scrollTop - activityLog.clientHeight < 40,
+        scrollTop = activityLog.scrollTop;
+    if (start > nextLogLine) {
+        activityLog.textContent = '';
+        firstLogLine = start;
+        nextLogLine = start;
     }
-    if (follow) { activityLog.scrollTop = activityLog.scrollHeight; }
-}
-
-function appendActivity(text) {
-    activityLines.push(text);
-    activityLines = activityLines.slice(-500);
-    renderActivity();
+    for (const { text, level } of lines.slice(nextLogLine - start)) {
+        const line = document.createElement('span');
+        line.className = level ? { ok: 'log-done', warning: 'log-warning', error: 'log-error' }[level]
+            : text.includes(' — started') ? 'log-started' : text.includes(' — done') ? 'log-done'
+                : text.includes(' — failed') || text.startsWith('ERROR:') ? 'log-error' : '';
+        line.textContent = text + '\n';
+        activityLog.appendChild(line);
+        nextLogLine++;
+    }
+    const removeCount = Math.max(0, nextLogLine - firstLogLine - transferLogLimit),
+        heightBefore = activityLog.scrollHeight;
+    for (let i = 0; i < removeCount; i++) {
+        activityLog.removeChild(activityLog.firstChild);
+    }
+    firstLogLine += removeCount;
+    activityPanel.hidden = false;
+    activityLog.scrollTop = follow ? activityLog.scrollHeight
+        : Math.max(0, scrollTop - (heightBefore - activityLog.scrollHeight));
 }
 
 /**
@@ -94,15 +105,11 @@ function renderSyncState(state) {
         + `Upload: ${formatTransferDuration(state.uploadMs ?? 0, state.uploadActive ?? false, transferPending)} | `
         + `Download: ${formatTransferDuration(state.downloadMs ?? 0, state.downloadActive ?? false, transferPending)} | `
         + `Session: ${formatDuration(state.elapsedMs)} | ${state.file}`;
-    activityLines = state.logs;
-    renderActivity();
-    if (state.result) { setStatus(state.result, state.status === 'complete' ? 'ok' : state.status); }
     if (state.progressReset) {
         updateProgress(0);
         progressBar.classList.remove('indeterminate');
         progressPercent.textContent = '';
         loader.style.display = 'none';
-        setStatus('', '');
     }
 }
 
@@ -119,10 +126,6 @@ function startSync(command) {
     if (syncRunning) { return; }
     setSyncRunning(true);
     activityPanel.hidden = false;
-    activityLines = [];
-    activityLog.textContent = '';
-    activityLog.scrollTop = 0;
-    appendActivity(command === 'dryRun' ? 'Preparing preview…\n' : 'Preparing synchronization…\n');
     startProgress();
     clearInterval(progressInterval);
     progressInterval = null;
@@ -250,17 +253,6 @@ function updateModeFields() {
 }
 
 /**
- * Sets the status message and CSS class.
- * @param {string} text - The status text.
- * @param {string} type - The status type class.
- * @returns {void}
- */
-function setStatus(text, type) {
-    statusEl.textContent = text;
-    statusEl.className = type || '';
-}
-
-/**
  * Displays a link to open the workspace settings.json file.
  * @param {string} settingsPath - The path to settings.json.
  * @returns {void}
@@ -306,7 +298,6 @@ function startProgress() {
     activityPanel.hidden = false;
     loader.style.display = 'block';
     if (!syncRunning) { loader.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); }
-    statusEl.style.display = 'none';
     createProgressBlocks();
     progressBar.classList.toggle('indeterminate', true);
     progressPercent.textContent = 'Working…';
@@ -330,7 +321,6 @@ function stopProgress() {
     progressBar.classList.toggle('indeterminate', false);
     progressHideTimeout = setTimeout(() => {
         loader.style.display = 'none';
-        statusEl.style.display = 'block';
     }, 250);
 }
 
@@ -377,6 +367,9 @@ document.getElementById('delete-config').addEventListener('click', () => {
 window.addEventListener('message', (event) => {
     const message = event.data;
     switch (message.command) {
+        case 'transferLog':
+            renderActivity(message);
+            break;
         case 'syncState':
             renderSyncState(message.state);
             break;
@@ -394,38 +387,22 @@ window.addEventListener('message', (event) => {
             break;
         case 'saved':
             stopProgress();
-            setStatus('Configuration saved privately for this workspace', 'ok');
             if (message.settingsPath) { showSettingsLink(message.settingsPath); }
             break;
         case 'error':
-            if (syncRunning) { appendActivity(`ERROR: ${message.detail}\n`); setSyncRunning(false); }
+            if (syncRunning) { setSyncRunning(false); }
             stopProgress();
-            setStatus(message.detail, 'error');
-            break;
-        case 'cancelResult':
-            setStatus(message.detail, message.status);
             break;
         case 'loginResult':
         case 'testResult':
             if (message.status === 'ok' && teleportLoginEl) { teleportLoginEl.hidden = true; }
             stopProgress();
-            setStatus(message.detail, message.status);
-            break;
-        case 'syncLog':
-            appendActivity(message.text);
-            break;
-        case 'syncResult':
-            appendActivity(`${message.status === 'error' ? 'ERROR: ' : ''}${message.detail}\n`);
-            setSyncRunning(false);
-            stopProgress();
-            setStatus(message.detail, message.status);
             break;
         case 'deleted':
             loadConfig({ mode: 'ftp', ftpPort: 21, sftpPort: 22, debounceMs: 300 });
             const modeElAfterDelete = document.getElementById('mode');
             if (modeElAfterDelete) { modeElAfterDelete.disabled = false; }
             if (settingsLinkEl) { settingsLinkEl.style.display = 'none'; }
-            setStatus('Configuration deleted', 'ok');
             break;
     }
 });

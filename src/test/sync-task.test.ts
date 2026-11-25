@@ -25,11 +25,13 @@ describe('extension-owned synchronization state', () => {
         const task = new SyncTask(), updates: any[] = [];
         task.subscribe((state) => updates.push(state));
         task.start(true);
-        for (let i = 0; i < 600; i++) { task.log(`file ${i}`); }
+        task.log(Array.from({ length: 2001 }, (_, i) => `file ${i}`).join('\n') + '\n');
         await new Promise((resolve) => setTimeout(resolve, 300));
         expect(updates.length).to.equal(2);
         expect(updates[1].elapsedMs).to.be.greaterThan(0);
-        expect(updates[1].logs).to.have.length(500);
+        expect(updates[1].logs).to.have.length(2000);
+        expect(updates[1].logs[0]).to.equal('file 1');
+        expect(updates[1].logs[1999]).to.equal('file 2000');
         expect(updates[1].percent).to.equal(undefined);
         task.finish('DRY RUN'); task.dispose();
     });

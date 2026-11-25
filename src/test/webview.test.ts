@@ -59,6 +59,8 @@ function createElement(): FakeElement {
             listeners[event] = listeners[event] || [];
             listeners[event].push(handler);
         },
+        get firstChild() { return children[0]; },
+        removeChild: (child: FakeElement) => { children.splice(children.indexOf(child), 1); },
         appendChild: (child: FakeElement) => {
             children.push(child);
         },
@@ -158,7 +160,6 @@ describe('webview config panel', () => {
         syncButton.click();
 
         expect(elements.loader.style.display).to.equal('block');
-        expect(elements.status.style.display).to.equal('none');
         expect(elements['progress-bar'].children.length).to.equal(20);
         expect(messages).to.deep.include({ command: 'sync' });
 
@@ -168,43 +169,39 @@ describe('webview config panel', () => {
         expect(elements['activity-panel'].hidden).to.equal(false);
         expect(elements['sync-now'].disabled).to.equal(true);
 
-        windowStub.postMessageToListeners({ data: { command: 'syncResult', status: 'ok', detail: 'Sync complete' } });
+        windowStub.postMessageToListeners({ data: { command: 'transferLog', start: 0, lines: [{ text: 'Sync complete', level: 'ok' }] } });
+        windowStub.postMessageToListeners({ data: { command: 'testResult', status: 'ok' } });
 
         await new Promise((resolve) => setTimeout(resolve, 300));
         expect(elements['progress-percent'].textContent).not.to.equal('100%');
         expect(elements.loader.style.display).to.equal('none');
-        expect(elements.status.style.display).to.equal('block');
-        expect(elements.status.textContent).to.equal('Sync complete');
-        expect(elements.status.className).to.equal('ok');
+        expect(elements['activity-log'].children[0].className).to.equal('log-done');
     });
-    it('streams literal file names, follows output and preserves manual scrolling', () => {
-        elements['dry-run'].click();
-        const log = elements['activity-log'];
-        windowStub.postMessageToListeners({ data: { command: 'syncLog', text: 'PLAN UPLOAD: <script>.txt\n' } });
-        expect(log.textContent).to.include('<script>.txt');
+    it('preserves history, renders literal output, and follows only from the bottom', () => {
+        const send = (start: number, lines: { text: string; level?: string }[]) =>
+                windowStub.postMessageToListeners({ data: { command: 'transferLog', start, lines } }),
+            first = [{ text: '<script>.txt', level: 'ok' }, { text: 'Connection lost', level: 'error' }],
+            log = elements['activity-log'];
+        send(0, first);
+        expect(log.textContent).to.equal('<script>.txt\nConnection lost\n');
         expect(log.children.every((child) => child.children.length === 0)).to.equal(true);
         expect(log.scrollTop).to.equal(log.scrollHeight);
+        expect(log.children.map((child) => child.className)).to.deep.equal(['log-done', 'log-error']);
         log.scrollHeight = 2000;
-        log.scrollTop = 0;
-        windowStub.postMessageToListeners({ data: { command: 'syncLog', text: 'next file\n' } });
-        expect(log.scrollTop).to.equal(0);
-        windowStub.postMessageToListeners({ data: { command: 'syncResult', status: 'error', detail: 'Connection lost' } });
-        expect(log.textContent).to.include('ERROR: Connection lost');
-        expect(elements['sync-now'].disabled).to.equal(false);
-        expect(elements['dry-run'].disabled).to.equal(false);
-    });
-
-    it('prevents duplicate runs and clears the previous log on a new run', () => {
+        log.scrollTop = 30;
+        send(0, [...first, { text: 'Cancelling', level: 'warning' }]);
+        expect(log.children).to.have.length(3);
+        expect(log.scrollTop).to.equal(30);
+        expect(log.children[2].className).to.equal('log-warning');
         elements['sync-now'].click();
         elements['dry-run'].click();
         expect(messages.filter((message) => ['sync', 'dryRun'].includes(message.command))).to.have.length(1);
-        windowStub.postMessageToListeners({ data: { command: 'syncResult', status: 'ok', detail: 'Old result' } });
-        elements['dry-run'].click();
-        expect(elements['activity-log'].textContent).not.to.include('Old result');
-        expect(messages).to.deep.include({ command: 'dryRun' });
-        windowStub.postMessageToListeners({ data: { command: 'syncResult', status: 'ok', detail: 'Preview done' } });
+        expect(log.textContent).to.include('Connection lost');
+        send(3, Array.from({ length: 1998 }, (_, i) => ({ text: `line ${i}` })));
+        expect(log.children).to.have.length(2000);
+        expect(log.children[0].textContent).to.equal('Connection lost\n');
+        expect(log.children[1999].textContent).to.equal('line 1997\n');
     });
-
     it('shows Cancel only during a transfer and sends the cancel request', () => {
         expect(elements['cancel-transfer'].hidden).to.equal(true);
 
@@ -216,7 +213,7 @@ describe('webview config panel', () => {
         expect(messages).to.deep.include({ command: 'cancel' });
         expect(elements['cancel-transfer'].disabled).to.equal(true);
 
-        windowStub.postMessageToListeners({ data: { command: 'syncResult', status: 'error', detail: 'Transfer cancelled' } });
+        windowStub.postMessageToListeners({ data: { command: 'syncState', state: { status: 'error', elapsedMs: 0 } } });
         expect(elements['cancel-transfer'].hidden).to.equal(true);
     });
 
@@ -241,12 +238,13 @@ describe('webview config panel', () => {
         expect(elements['progress-percent'].textContent).to.include('Download: 75 ms');
         expect(elements['progress-percent'].textContent).to.include('Session: 2.00 s');
         expect(elements['sync-now'].disabled).to.equal(true);
+        windowStub.postMessageToListeners({ data: { command: 'transferLog', start: 0,
+            lines: state.logs.map((text) => ({ text: text.trimEnd() })) } });
         expect(elements['activity-log'].children.map((line) => line.className)).to.deep.equal(['log-started', 'log-done']);
         (windowListeners.focus || []).forEach((listener) => listener());
         expect(messages).to.deep.include({ command: 'getSyncState' });
         windowStub.postMessageToListeners({ data: { command: 'syncState', state: { ...state, status: 'error', result: 'Connection lost' } } });
         expect(elements['progress-percent'].textContent).to.include('45%');
-        expect(elements.status.textContent).to.equal('Connection lost');
         expect(elements['sync-now'].disabled).to.equal(false);
     });
 
